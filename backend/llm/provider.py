@@ -1,68 +1,466 @@
 """LLM Provider Abstraction Layer.
 
-Decouples the system from specific model backends (Local HuggingFace, Ollama, vLLM, or Mock).
-Supports Qwen 2.5/3 14B primary, Llama 3.1 8B fallback, and Mock mode for development without GPU.
+Decouples the system from specific model backends (Local HuggingFace, Ollama,
+OpenAI-compatible inference servers, or Mock/offline mode).
+
+Supported providers (set LLM_PROVIDER env var):
+  - mock         : Deterministic test provider. No downloads, no GPU, no internet.
+  - ollama       : Ollama local inference server (http://localhost:11434).
+  - openai       : Any OpenAI-compatible REST API endpoint (Ollama, vLLM, LM Studio, etc.)
+  - huggingface  : Local HuggingFace Transformers — lazy-loaded, no GPU required at import time.
+
+Fine-tuned model integration point:
+  When a LoRA/QLoRA fine-tuned adapter is ready, set:
+    LLM_PROVIDER=huggingface
+    PRIMARY_MODEL=./finetuned/qwen3_deadlock_lora
+  The HuggingFaceProvider will load the adapter transparently via PEFT.
 """
 
+from __future__ import annotations
+
+import logging
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 from pydantic import BaseModel
+
 from backend.config.settings import settings
 
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Data transfer models
+# ---------------------------------------------------------------------------
 
 class LLMRequest(BaseModel):
+    """Unified request object for all LLM providers."""
     prompt: str
     system_prompt: Optional[str] = (
-        "You are DeadlockTutorLLM, a specialized OS deadlock tutor. "
-        "Teach step-by-step, maintain syllabus grounding, explain misconceptions clearly, "
-        "and never hallucinate calculations."
+        "You are DeadlockTutorLLM, a specialized tutor for Operating Systems deadlocks. "
+        "Always teach step-by-step. When given solver output, explain each step clearly to "
+        "the student — never recalculate or contradict the solver's numbers. "
+        "Cite provided sources. Never fabricate course-specific facts not present in context."
     )
-    temperature: float = 0.2
-    max_tokens: int = 1024
+    temperature: float = settings.llm_temperature
+    max_tokens: int = settings.llm_max_tokens
+    context: Optional[str] = None  # RAG-retrieved text to inject into the prompt
 
 
 class LLMResponse(BaseModel):
+    """Unified response object from any LLM provider."""
     content: str
     model_name: str
+    provider: str
     metadata: Dict[str, Any] = {}
 
 
+# ---------------------------------------------------------------------------
+# Abstract base
+# ---------------------------------------------------------------------------
+
 class BaseLLMProvider(ABC):
-    """Abstract interface for LLM inference."""
+    """Abstract interface that all concrete providers must implement."""
 
     @abstractmethod
     def generate(self, request: LLMRequest) -> LLMResponse:
-        pass
+        """Generate a response for the given request.
 
+        Args:
+            request: LLMRequest containing prompt, system_prompt, and optional context.
+
+        Returns:
+            LLMResponse with content, model_name, and metadata.
+        """
+
+    def is_available(self) -> bool:  # noqa: D102
+        """Returns True if this provider can currently serve requests."""
+        return True
+
+
+# ---------------------------------------------------------------------------
+# 1. Mock provider — deterministic, zero dependencies, used for all tests
+# ---------------------------------------------------------------------------
 
 class MockLLMProvider(BaseLLMProvider):
-    """Mock LLM Provider for rapid development and testing without GPU."""
+    """Deterministic mock provider for offline development and automated tests.
+
+    Returns structured, predictable responses based on keywords in the prompt so
+    that integration tests can assert on content without a real model.
+    """
 
     def __init__(self, model_name: str = "mock-tutor-v1"):
         self.model_name = model_name
 
-    def generate(self, request: LLMRequest) -> LLMResponse:
-        prompt_snippet = request.prompt[:80].strip()
-        response_text = (
-            f"**[DeadlockTutorLLM Development Mode - Model: {self.model_name}]**\n\n"
-            f"Received query context regarding: '{prompt_snippet}...'\n\n"
-            "Here is the educational breakdown:\n"
-            "1. **Core Concept**: Deadlock occurs when a set of processes are blocked because each process is holding a resource and waiting for another resource acquired by some other process.\n"
-            "2. **Coffman Conditions**: Mutual Exclusion, Hold and Wait, No Preemption, Circular Wait.\n"
-            "3. **Key Distinction**: An UNSAFE state does NOT strictly mean the system is currently deadlocked. An unsafe state means no safe sequence is guaranteed to prevent future deadlock if all processes request their maximum claim.\n\n"
-            "*(This response was generated by the mock LLM provider for Phase 1 MVP validation.)*"
-        )
+    def generate(self, request: LLMRequest) -> LLMResponse:  # noqa: D102
+        prompt_lower = (request.prompt or "").lower()
+
+        # --- theory / Coffman ---
+        if any(k in prompt_lower for k in ["coffman", "four condition", "mutual exclusion"]):
+            content = (
+                "**Coffman Conditions for Deadlock**\n\n"
+                "A deadlock can occur **only** when all four conditions hold simultaneously:\n\n"
+                "1. **Mutual Exclusion** — At least one resource must be held in a non-shareable mode.\n"
+                "2. **Hold and Wait** — A process holding resources can request additional resources.\n"
+                "3. **No Preemption** — Resources cannot be forcibly taken from a process.\n"
+                "4. **Circular Wait** — A circular chain P0→P1→…→Pn→P0 of waiting processes exists.\n\n"
+                "> *(Response generated by MockLLMProvider — connect a real LLM for richer explanations.)*"
+            )
+        # --- banker's / numerical ---
+        elif any(k in prompt_lower for k in ["banker", "safe sequence", "safety", "need matrix", "allocation"]):
+            content = (
+                "**Banker's Algorithm — Teaching Explanation**\n\n"
+                "The Banker's Algorithm determines whether the current resource state is **safe**.\n\n"
+                "**Step-by-step:**\n"
+                "1. **Calculate Need** = Max − Allocation for every process.\n"
+                "2. Set Work = Available; mark all processes as unfinished.\n"
+                "3. Find an unfinished process Pi where Need[Pi] ≤ Work.\n"
+                "4. If found: Work = Work + Allocation[Pi]; mark Pi finished.\n"
+                "5. Repeat until all processes finish (SAFE) or no progress (UNSAFE).\n\n"
+                "> *The deterministic solver computed the exact numbers above — this explanation is LLM-generated.*"
+            )
+        # --- graph / wait-for ---
+        elif any(k in prompt_lower for k in ["wait-for", "wait for graph", "cycle", "graph"]):
+            content = (
+                "**Wait-For Graph Cycle Detection**\n\n"
+                "In a **single-instance** resource system, deadlock ↔ a cycle exists in the Wait-For Graph.\n\n"
+                "The DFS-based cycle detector above reports every cycle found. "
+                "Each process in a cycle is **deadlocked** — it can never make progress.\n\n"
+                "> *Cycle detection was performed by the deterministic solver; this is the pedagogical explanation.*"
+            )
+        # --- lab / pthread ---
+        elif any(k in prompt_lower for k in ["pthread", "mutex", "semaphore", "dining philosopher", "lab", "code"]):
+            content = (
+                "**Lab / Concurrency Explanation**\n\n"
+                "The classic **Dining Philosophers** scenario demonstrates circular wait with `pthread_mutex_lock`.\n\n"
+                "**Common deadlock pattern:**\n"
+                "```c\n"
+                "pthread_mutex_lock(&fork[i]);        // hold left fork\n"
+                "pthread_mutex_lock(&fork[(i+1)%N]);  // wait for right fork\n"
+                "```\n"
+                "If every philosopher picks up their left fork simultaneously, no right fork is available → **deadlock**.\n\n"
+                "**Prevention**: Impose a global ordering on fork acquisition (e.g. always take lower-numbered fork first).\n\n"
+                "> *Refer to course lab materials for specific API requirements.*"
+            )
+        # --- unsafe vs deadlock ---
+        elif any(k in prompt_lower for k in ["unsafe", "not safe"]):
+            content = (
+                "**Important Distinction: Unsafe State ≠ Deadlock**\n\n"
+                "An **unsafe state** means the system *cannot guarantee* that all processes will finish "
+                "if they all request their maximum resources. A deadlock *may or may not* actually occur.\n\n"
+                "A **deadlocked state** means processes are *currently* blocked — they are definitely stuck.\n\n"
+                "Every deadlocked state is unsafe, but not every unsafe state is deadlocked.\n\n"
+                "> *(MockLLMProvider response — connect a real LLM for richer explanations.)*"
+            )
+        else:
+            content = (
+                "**DeadlockTutorLLM — General Response**\n\n"
+                f"Your question: *\"{request.prompt[:120].strip()}...\"*\n\n"
+                "Key OS deadlock topics I can help with:\n"
+                "- **Theory**: Coffman conditions, prevention, avoidance, detection, recovery\n"
+                "- **Numerical**: Banker's safety algorithm, resource-request algorithm, matrix detection\n"
+                "- **Graph**: Resource-allocation graphs, wait-for graphs, cycle detection\n"
+                "- **Lab**: pthread mutexes, semaphores, Dining Philosophers\n\n"
+                "> *(MockLLMProvider — set LLM_PROVIDER=ollama and configure a real model for full answers.)*"
+            )
+
         return LLMResponse(
-            content=response_text,
+            content=content,
             model_name=self.model_name,
-            metadata={"provider": "mock", "tokens": 150}
+            provider="mock",
+            metadata={"tokens_estimated": len(content.split()), "offline": True},
         )
 
+
+# ---------------------------------------------------------------------------
+# 2. Ollama provider — local Ollama inference server
+# ---------------------------------------------------------------------------
+
+class OllamaProvider(BaseLLMProvider):
+    """Provider targeting a local Ollama instance (http://localhost:11434).
+
+    No model is downloaded here — Ollama must be installed separately and the
+    model pulled beforehand (e.g. `ollama pull qwen2.5:14b`).
+
+    Fine-tuned model integration:
+        `ollama create deadlock-tutor -f Modelfile` then set PRIMARY_MODEL=deadlock-tutor.
+    """
+
+    def __init__(self, model_name: str, api_base: str = "http://localhost:11434"):
+        self.model_name = model_name
+        self.api_base = api_base.rstrip("/")
+        self._client: Optional[Any] = None
+
+    def _get_client(self) -> Any:
+        """Lazy-import httpx to avoid import-time overhead."""
+        if self._client is None:
+            try:
+                import httpx  # noqa: PLC0415
+                self._client = httpx.Client(timeout=120.0)
+            except ImportError as exc:
+                raise ImportError("httpx is required for OllamaProvider. It is already in requirements.txt.") from exc
+        return self._client
+
+    def is_available(self) -> bool:  # noqa: D102
+        try:
+            client = self._get_client()
+            r = client.get(f"{self.api_base}/api/tags", timeout=3.0)
+            return r.status_code == 200
+        except Exception:
+            return False
+
+    def generate(self, request: LLMRequest) -> LLMResponse:  # noqa: D102
+        client = self._get_client()
+        messages = []
+        if request.system_prompt:
+            messages.append({"role": "system", "content": request.system_prompt})
+        if request.context:
+            messages.append({"role": "system", "content": f"Context from course materials:\n{request.context}"})
+        messages.append({"role": "user", "content": request.prompt})
+
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "options": {
+                "temperature": request.temperature,
+                "num_predict": request.max_tokens,
+            },
+            "stream": False,
+        }
+        try:
+            resp = client.post(f"{self.api_base}/api/chat", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            content = data.get("message", {}).get("content", "")
+            return LLMResponse(
+                content=content,
+                model_name=self.model_name,
+                provider="ollama",
+                metadata={"eval_count": data.get("eval_count", 0)},
+            )
+        except Exception as exc:
+            logger.error("OllamaProvider.generate failed: %s", exc)
+            raise RuntimeError(f"Ollama inference failed: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# 3. OpenAI-compatible REST API provider (works with Ollama /v1, vLLM, LM Studio)
+# ---------------------------------------------------------------------------
+
+class OpenAICompatibleProvider(BaseLLMProvider):
+    """Provider for any OpenAI-compatible chat completions endpoint.
+
+    Set LLM_API_BASE to point to your inference server and LLM_API_KEY if needed.
+
+    Fine-tuned model integration:
+        Point LLM_API_BASE at a vLLM server loading the fine-tuned PEFT adapter.
+    """
+
+    def __init__(self, model_name: str, api_base: str, api_key: str = ""):
+        self.model_name = model_name
+        self.api_base = api_base.rstrip("/")
+        self.api_key = api_key
+        self._client: Optional[Any] = None
+
+    def _get_client(self) -> Any:
+        if self._client is None:
+            try:
+                import httpx  # noqa: PLC0415
+                headers = {"Content-Type": "application/json"}
+                if self.api_key:
+                    headers["Authorization"] = f"Bearer {self.api_key}"
+                self._client = httpx.Client(headers=headers, timeout=120.0)
+            except ImportError as exc:
+                raise ImportError("httpx is required for OpenAICompatibleProvider.") from exc
+        return self._client
+
+    def is_available(self) -> bool:  # noqa: D102
+        try:
+            client = self._get_client()
+            r = client.get(f"{self.api_base}/models", timeout=3.0)
+            return r.status_code == 200
+        except Exception:
+            return False
+
+    def generate(self, request: LLMRequest) -> LLMResponse:  # noqa: D102
+        client = self._get_client()
+        messages = []
+        if request.system_prompt:
+            messages.append({"role": "system", "content": request.system_prompt})
+        if request.context:
+            messages.append({"role": "system", "content": f"Context from course materials:\n{request.context}"})
+        messages.append({"role": "user", "content": request.prompt})
+
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+        }
+        try:
+            resp = client.post(f"{self.api_base}/chat/completions", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"]
+            usage = data.get("usage", {})
+            return LLMResponse(
+                content=content,
+                model_name=self.model_name,
+                provider="openai_compatible",
+                metadata={"usage": usage},
+            )
+        except Exception as exc:
+            logger.error("OpenAICompatibleProvider.generate failed: %s", exc)
+            raise RuntimeError(f"OpenAI-compatible inference failed: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# 4. HuggingFace local Transformers provider — lazy model loading
+# ---------------------------------------------------------------------------
+
+class HuggingFaceProvider(BaseLLMProvider):
+    """Local HuggingFace Transformers provider with lazy model loading.
+
+    The model is NOT loaded at import time — only when the first generate()
+    call is made.  This keeps the test suite fast even when this provider
+    class is instantiated.
+
+    Fine-tuned model integration point:
+        Set PRIMARY_MODEL=./finetuned/qwen3_deadlock_lora
+        The loader detects PEFT adapters automatically via peft.PeftModel.from_pretrained().
+    """
+
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+        self._model: Optional[Any] = None
+        self._tokenizer: Optional[Any] = None
+        self._pipe: Optional[Any] = None
+
+    def _load_model(self) -> None:
+        """Lazily load model and tokenizer on first use."""
+        if self._pipe is not None:
+            return
+        logger.info("HuggingFaceProvider: Loading model '%s' (this may take a while)...", self.model_name)
+        try:
+            from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM  # noqa: PLC0415
+            import torch  # noqa: PLC0415
+
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+
+            tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                trust_remote_code=True,
+                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                device_map="auto" if device == "cuda" else None,
+            )
+
+            # PEFT fine-tuned adapter support
+            try:
+                from peft import PeftModel  # noqa: PLC0415
+                import os  # noqa: PLC0415
+                adapter_path = os.path.join(self.model_name, "adapter_config.json")
+                if os.path.exists(adapter_path):
+                    model = PeftModel.from_pretrained(model, self.model_name)
+                    logger.info("Loaded PEFT adapter from '%s'.", self.model_name)
+            except ImportError:
+                pass  # peft not installed — fine, use base model
+
+            self._pipe = pipeline(
+                "text-generation",
+                model=model,
+                tokenizer=tokenizer,
+                device=0 if device == "cuda" else -1,
+            )
+            logger.info("HuggingFaceProvider: Model loaded successfully.")
+        except Exception as exc:
+            logger.error("HuggingFaceProvider: Failed to load model '%s': %s", self.model_name, exc)
+            raise RuntimeError(
+                f"Failed to load HuggingFace model '{self.model_name}'. "
+                "Ensure the model is downloaded or set LLM_PROVIDER=mock for offline mode."
+            ) from exc
+
+    def is_available(self) -> bool:  # noqa: D102
+        try:
+            import transformers  # noqa: PLC0415, F401
+            return True
+        except ImportError:
+            return False
+
+    def generate(self, request: LLMRequest) -> LLMResponse:  # noqa: D102
+        self._load_model()
+        parts = []
+        if request.system_prompt:
+            parts.append(f"<|system|>\n{request.system_prompt}\n")
+        if request.context:
+            parts.append(f"<|system|>\nContext:\n{request.context}\n")
+        parts.append(f"<|user|>\n{request.prompt}\n<|assistant|>")
+        full_prompt = "".join(parts)
+
+        try:
+            output = self._pipe(
+                full_prompt,
+                max_new_tokens=request.max_tokens,
+                temperature=request.temperature,
+                do_sample=request.temperature > 0,
+                return_full_text=False,
+            )
+            content = output[0]["generated_text"].strip()
+            return LLMResponse(
+                content=content,
+                model_name=self.model_name,
+                provider="huggingface",
+                metadata={},
+            )
+        except Exception as exc:
+            logger.error("HuggingFaceProvider.generate failed: %s", exc)
+            raise RuntimeError(f"HuggingFace generation failed: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
 
 def get_llm_provider() -> BaseLLMProvider:
-    """Factory to retrieve configured LLM provider."""
+    """Factory returning the configured LLM provider.
+
+    Provider selection (LLM_PROVIDER env var):
+        mock            → MockLLMProvider (default, no downloads)
+        ollama          → OllamaProvider  (local Ollama server)
+        openai          → OpenAICompatibleProvider (REST API)
+        huggingface     → HuggingFaceProvider (local Transformers, lazy load)
+
+    Fallback behaviour:
+        If the configured provider is unavailable, falls back to MockLLMProvider
+        and logs a warning rather than crashing the server.
+    """
     provider_type = settings.llm_provider.lower()
+
     if provider_type == "mock":
         return MockLLMProvider(model_name=settings.primary_model)
-    # Additional providers (Ollama, HuggingFace Local, vLLM) can be wired here in Phase 4
+
+    if provider_type == "ollama":
+        provider = OllamaProvider(
+            model_name=settings.primary_model,
+            api_base=settings.llm_api_base,
+        )
+        if provider.is_available():
+            return provider
+        logger.warning(
+            "Ollama provider unavailable at %s. Falling back to MockLLMProvider.", settings.llm_api_base
+        )
+        return MockLLMProvider(model_name=settings.primary_model)
+
+    if provider_type in ("openai", "openai_compatible"):
+        provider = OpenAICompatibleProvider(
+            model_name=settings.primary_model,
+            api_base=settings.llm_api_base,
+            api_key=settings.llm_api_key,
+        )
+        return provider  # connection errors surface at generate() time
+
+    if provider_type == "huggingface":
+        return HuggingFaceProvider(model_name=settings.primary_model)
+
+    logger.warning("Unknown LLM_PROVIDER '%s'. Using MockLLMProvider.", provider_type)
     return MockLLMProvider(model_name=settings.primary_model)

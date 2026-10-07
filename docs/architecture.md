@@ -7,37 +7,60 @@ Student
 Chat Interface (Streamlit)
    │
    ▼
-FastAPI Gateway & Query Router
+FastAPI Gateway & Chat Route (/api/chat)
    │
-   ├──────────────────────────┬──────────────────────────┐
-   ▼                          ▼                          ▼
-Theory/Concepts            Numerical Problems         Wait-for / RAG Graph
-   │                          │                          │
-   ▼                          ▼                          ▼
-RAG Pipeline           Symbolic Solver            Graph Analysis
-(BGE Embeddings +      (Banker's Algorithm,       (DFS Cycle Detection)
-FAISS Vector DB)        Need/Work Matrices)              │
-   │                          │                          │
-   └─────────────┬────────────┴──────────────────────────┘
-                 ▼
-          Prompt Assembler
-                 ▼
-        Pedagogical LLM Engine
-                 ▼
-          Response Composer
-                 │
-                 ├─► Verified step-by-step calculations
-                 ├─► Syllabus page citations
-                 ├─► Clarification of common misconceptions
-                 │
-                 ▼
-          Student Answer
+   ▼
+Orchestrator (DeadlockTutorOrchestrator)
+   │
+   ├──► 1. Query Router (Regex Pattern Classifier)
+   │
+   ├──► 2. Dispatch
+   │       ├─► THEORY / LAB ──► RAG Retriever (FAISS + BGE)
+   │       └─► NUMERICAL / GRAPH ──► Deterministic Solver (Banker's, DFS Cycles)
+   │
+   ├──► 3. Prompt Assembly (Combines RAG context + Solver traces)
+   │
+   ├──► 4. LLM Provider Abstraction
+   │       ├─► MockLLMProvider (for testing/offline)
+   │       ├─► OllamaProvider (local models)
+   │       ├─► OpenAICompatibleProvider (vLLM, LM Studio)
+   │       └─► HuggingFaceProvider (transformers + PEFT)
+   │
+   └──► 5. Response Composer (Structured grounding, step formatting, citations)
+           │
+           ▼
+     ChatResponse (Answer, Grounded Flag, Sources, Worked Steps, Teaching Notes)
+           │
+           ▼
+Student (Frontend UI)
 ```
 
 ## Guiding Principles
-1. **RAG controls WHAT the system knows**: Factual content is retrieved directly from syllabus textbooks (e.g. Silberschatz) and lecture slides.
-2. **Deterministic Solver guarantees NUMERICAL CORRECTNESS**: Multi-step mathematical calculations (e.g. Need matrix, Work updates, safe sequences) are never computed by the LLM. The solver performs the computation, and the LLM translates the verified trace into a student-friendly explanation.
-3. **Fine-Tuning controls HOW the system teaches**: Guides the pedagogical tone—scaffolding hints, explaining errors, and separating similar concepts (e.g. *unsafe state vs. deadlock*).
+1. **RAG controls WHAT the system knows**: Factual content is retrieved directly from syllabus textbooks (e.g., Silberschatz) and lecture slides. If RAG fails to find context, the system explicitly flags the response as **Not Grounded**.
+2. **Deterministic Solver guarantees NUMERICAL CORRECTNESS**: Multi-step mathematical calculations (e.g., Need matrix, Work updates, safe sequences) are never computed by the LLM. The solver performs the computation, and the LLM translates the verified trace into a student-friendly explanation.
+3. **Fine-Tuning controls HOW the system teaches**: Guides the pedagogical tone—scaffolding hints, explaining errors, and separating similar concepts (e.g., *unsafe state vs. deadlock*).
+
+---
+
+## Component Details
+
+### 1. Orchestrator (`backend/orchestrator.py`)
+The central coordinator that safely wires together the router, the RAG retriever, the deterministic solver, and the LLM. It manages prompt construction and groundedness verification, ensuring the LLM is tightly constrained by verified data.
+
+### 2. Query Router (`backend/router/query_router.py`)
+Classifies incoming student queries into:
+- **THEORY**: Conceptual/definitional questions → RAG pipeline
+- **NUMERICAL**: Algorithm problems with matrices/numbers → Deterministic Solver
+- **GRAPH**: Wait-for graph / resource-allocation graph questions → Graph Solver
+- **LAB**: Code / pthread / concurrency implementation questions → RAG + code context
+
+### 3. Response Composer (`backend/composer/response_composer.py`)
+Harmonizes all outputs. Enforces pedagogical rules (e.g., automatically appending a note explaining that an unsafe state does not guarantee deadlock for all numerical problems). Assembles structured output including `citations`, `worked_steps`, and `teaching_notes`.
+
+### 4. LLM Providers (`backend/llm/provider.py`)
+- Configured via `.env`.
+- Graceful degradation ensures that if the LLM backend is offline, the pipeline still returns verified numerical results and citations using a fallback error message.
+- A **MockLLMProvider** is used by default for zero-download, 100% offline automated testing.
 
 ---
 
@@ -60,40 +83,18 @@ User-Provided Documents (kb/raw/)
             ▼
      DocumentChunk Objects
   (id, content, source, page/slide, doc_type, topic, citation)
-            │
-            ├─► Saved to kb/processed/chunks.json
-            └─► Catalog saved to kb/metadata/catalog.json
 ```
 
 ### 2. Embeddings & Vector Storage
 - **Embedding Layer**:
-  - `DeterministicEmbedding`: Feature-hashing model generating unit-normalized dense vectors ($L_2 = 1.0$) with zero network downloads, ideal for test suites and development laptops.
-  - `SentenceTransformerEmbedding`: Production wrapper around `BAAI/bge-large-en` via `sentence-transformers`.
+  - `DeterministicEmbedding`: Feature-hashing model generating unit-normalized dense vectors ($L_2 = 1.0$) with zero network downloads, ideal for test suites.
+  - `SentenceTransformerEmbedding`: Production wrapper around `BAAI/bge-large-en`.
 - **Vector Database**:
-  - `FAISSVectorStore`: Uses native FAISS `IndexFlatIP` (Cosine similarity on normalized vectors).
-  - `NumpyVectorStore`: Seamless fallback using matrix dot products if FAISS is not present.
-  - Index files persisted to `kb/processed/faiss_index.faiss` and `.meta.json`.
+  - `FAISSVectorStore` (Cosine similarity on normalized vectors).
+  - `NumpyVectorStore` (Fallback).
 
-### 3. Retrieval & Groundedness Support
-- Accepts student query, generates dense embedding vector.
-- Retrieves configurable top-$k$ chunks (default: 4–6).
-- Computes relevance score ($0.0 \le \text{score} \le 1.0$).
-- **Groundedness Sufficiency**:
-  - If $\max(\text{score}) \ge \text{relevance\_threshold}$ (default 0.25): `has_sufficient_context = True`.
-  - If $\max(\text{score}) < \text{relevance\_threshold}$ or KB is empty: `has_sufficient_context = False`. The system explicitly flags that the query cannot be grounded in provided course material.
+---
 
-### 4. Citation Metadata
-Every chunk preserves exact location metadata, formatting citations such as:
-- `[Source: Silberschatz_Operating_Systems.pdf, page 318]`
-- `[Source: Deadlock_Lecture_Notes.pptx, slide 14]`
-
-### 5. Knowledge Base Usage Instructions
-- **Placing documents**: Copy PDF or PPTX lecture slides into `kb/raw/`.
-- **Running ingestion via CLI**:
-  ```bash
-  python scripts/ingest_kb.py
-  ```
-- **Running search via API**:
-  ```bash
-  curl -X POST http://127.0.0.1:8000/api/rag/search -H "Content-Type: application/json" -d "{\"query\": \"Coffman conditions\", \"top_k\": 4}"
-  ```
+## Future Expansion: QLoRA Fine-Tuning
+The architecture is designed to support a fine-tuned LoRA adapter injected via the `HuggingFaceProvider`.
+*Note: As of Phase 4, the base implementation relies on prompt engineering and RAG/Solver grounding. The actual model weights have not yet been fine-tuned.*

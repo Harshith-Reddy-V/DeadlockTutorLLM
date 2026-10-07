@@ -20,10 +20,9 @@ st.caption("A Domain-Specific AI Tutor for Operating System Deadlocks (RAG + Sym
 # Sidebar for modes and backend status
 with st.sidebar:
     st.header("⚙️ Tutor Settings")
-    mode = st.selectbox(
-        "Study Mode",
-        ["Ask a Question", "Practice Mode", "Hint Mode", "Generate MCQ", "Generate Viva Question"]
-    )
+    if st.button("🗑️ Clear Conversation"):
+        st.session_state["messages"] = []
+        st.experimental_rerun()
 
     st.divider()
     st.subheader("Backend Status")
@@ -34,6 +33,7 @@ with st.sidebar:
             st.success(f"Backend: Connected ({data.get('status')})")
             st.write(f"**Provider**: `{data.get('llm_provider')}`")
             st.write(f"**Model**: `{data.get('primary_model')}`")
+            st.write(f"**RAG Chunks**: `{data.get('rag_indexed_chunks', 0)}`")
         else:
             st.warning(f"Backend returned HTTP {health_resp.status_code}")
     except Exception as e:
@@ -51,7 +51,7 @@ with st.sidebar:
         st.session_state["preset_query"] = "How does circular wait cause deadlock in the dining philosophers problem with pthreads?"
 
 # Initialize chat session history
-if "messages" not in st.session_state:
+if "messages" not in st.session_state or not st.session_state["messages"]:
     st.session_state["messages"] = [
         {
             "role": "assistant",
@@ -65,16 +65,33 @@ for msg in st.session_state["messages"]:
         st.markdown(msg["content"])
         if "metadata" in msg and msg["metadata"]:
             meta = msg["metadata"]
+            
+            # Groundedness Badges
+            category = meta.get("category", "")
+            grounded = meta.get("grounded", False)
+            if category:
+                if grounded:
+                    st.caption(f"🎯 Category: **{category.upper()}** | 🟢 **Grounded**")
+                else:
+                    st.caption(f"🎯 Category: **{category.upper()}** | 🔴 **Not Grounded**")
+
+            # Solver Steps
             if meta.get("worked_steps"):
                 with st.expander("📝 Solver Calculations & Worked Steps"):
                     for step in meta["worked_steps"]:
-                        st.write(f"- {step}")
-            if meta.get("citations"):
+                        st.markdown(f"- {step}")
+            
+            # Citations
+            if meta.get("sources"):
                 with st.expander("📚 Syllabus Citations & Sources"):
-                    for cit in meta["citations"]:
-                        st.markdown(f"**Source**: `{cit.get('source')}` | **Page**: {cit.get('page', 'N/A')}")
+                    for cit in meta["sources"]:
+                        st.markdown(f"**Source**: `{cit.get('source')}` | **Page/Slide**: {cit.get('page', 'N/A')}")
+            
+            # Teaching Notes
             if meta.get("teaching_notes"):
-                with st.expander("💡 Teaching Notes & Conceptual Warnings"):
+                with st.expander("💡 Teaching Notes & Grounding Messages"):
+                    if meta.get("groundedness_message"):
+                        st.info(meta.get("groundedness_message"))
                     for note in meta["teaching_notes"]:
                         st.info(note)
 
@@ -93,36 +110,54 @@ if prompt_to_send:
     with st.chat_message("assistant"):
         with st.spinner("Tutor is analyzing your question..."):
             try:
-                payload = {"message": prompt_to_send}
-                resp = requests.post(f"{BACKEND_URL}/api/chat", json=payload, timeout=10)
+                # ChatRequest schema expects 'query'
+                payload = {"query": prompt_to_send}
+                resp = requests.post(f"{BACKEND_URL}/api/chat", json=payload, timeout=20)
+                
                 if resp.status_code == 200:
                     data = resp.json()
-                    explanation = data.get("explanation", "No response content.")
-                    st.markdown(explanation)
+                    answer = data.get("answer", "No response content.")
+                    st.markdown(answer)
 
+                    category = data.get("category", "unknown")
+                    grounded = data.get("grounded", False)
+                    groundedness_message = data.get("groundedness_message", "")
                     worked_steps = data.get("worked_steps", [])
-                    citations = data.get("citations", [])
+                    sources = data.get("sources", [])
                     teaching_notes = data.get("teaching_notes", [])
+
+                    if grounded:
+                        st.caption(f"🎯 Category: **{category.upper()}** | 🟢 **Grounded**")
+                    else:
+                        st.caption(f"🎯 Category: **{category.upper()}** | 🔴 **Not Grounded**")
 
                     if worked_steps:
                         with st.expander("📝 Solver Calculations & Worked Steps"):
                             for step in worked_steps:
-                                st.write(f"- {step}")
-                    if citations:
+                                st.markdown(f"- {step}")
+                                
+                    if sources:
                         with st.expander("📚 Syllabus Citations & Sources"):
-                            for cit in citations:
-                                st.markdown(f"**Source**: `{cit.get('source')}` | **Page**: {cit.get('page', 'N/A')}")
-                    if teaching_notes:
-                        with st.expander("💡 Teaching Notes & Conceptual Warnings"):
+                            for cit in sources:
+                                st.markdown(f"**Source**: `{cit.get('source')}` | **Page/Slide**: {cit.get('page', 'N/A')}")
+                                
+                    if teaching_notes or groundedness_message:
+                        with st.expander("💡 Teaching Notes & Grounding Messages"):
+                            if groundedness_message:
+                                st.info(groundedness_message)
                             for note in teaching_notes:
                                 st.info(note)
 
+                    # Save to history
                     st.session_state["messages"].append({
                         "role": "assistant",
-                        "content": explanation,
+                        "content": answer,
                         "metadata": {
+                            "category": category,
+                            "grounded": grounded,
+                            "groundedness_message": groundedness_message,
                             "worked_steps": worked_steps,
-                            "citations": citations,
+                            "sources": sources,
                             "teaching_notes": teaching_notes
                         }
                     })
@@ -130,7 +165,8 @@ if prompt_to_send:
                     err_msg = f"Error from backend (HTTP {resp.status_code}): {resp.text}"
                     st.error(err_msg)
                     st.session_state["messages"].append({"role": "assistant", "content": err_msg})
-            except Exception as e:
+                    
+            except requests.exceptions.RequestException as e:
                 offline_msg = f"Unable to reach DeadlockTutorLLM backend at `{BACKEND_URL}`. Ensure FastAPI is running."
                 st.error(offline_msg)
                 st.session_state["messages"].append({"role": "assistant", "content": offline_msg})

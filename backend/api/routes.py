@@ -1,12 +1,13 @@
-"""FastAPI Application Routes."""
+"""FastAPI Application Routes — Phase 4 Complete Pipeline."""
 
 from typing import List, Optional
+
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from backend.config.settings import settings
 from backend.router.query_router import QueryRouter, QueryCategory
-from backend.rag.retriever import BaseRetriever, RetrievalResult, ScoredChunk
+from backend.rag.retriever import BaseRetriever, RetrievalResult
 from backend.rag.ingestion import IngestionReport
 from backend.solver.engine import (
     safety_check,
@@ -24,33 +25,35 @@ from backend.solver.models import (
     MultiInstanceDetectionInput,
     MultiInstanceDetectionResult,
 )
-from backend.llm.provider import get_llm_provider, LLMRequest
+from backend.llm.provider import get_llm_provider, LLMRequest, BaseLLMProvider
 from backend.composer.response_composer import ResponseComposer, ComposedResponse
+from backend.orchestrator import (
+    DeadlockTutorOrchestrator,
+    ChatRequest,
+    ChatResponse,
+)
 
 router = APIRouter()
-query_router = QueryRouter()
-retriever = BaseRetriever()
-composer = ResponseComposer()
-llm = get_llm_provider()
+
+# ---------------------------------------------------------------------------
+# Module-level singletons — instantiated once at startup
+# ---------------------------------------------------------------------------
+_query_router = QueryRouter()
+_retriever = BaseRetriever()
+_composer = ResponseComposer()
+_llm: BaseLLMProvider = get_llm_provider()
+
+_orchestrator = DeadlockTutorOrchestrator(
+    llm_provider=_llm,
+    retriever=_retriever,
+    router=_query_router,
+    composer=_composer,
+)
 
 
-class HealthCheckResponse(BaseModel):
-    status: str
-    app_name: str
-    version: str
-    environment: str
-    llm_provider: str
-    primary_model: str
-
-
-class ChatRequest(BaseModel):
-    message: str = Field(..., description="Student query or problem statement")
-    banker_state: BankerStateInput = Field(default=None, description="Optional structured state for numerical questions")
-
-
-# =====================================================================
+# ---------------------------------------------------------------------------
 # RAG Schemas
-# =====================================================================
+# ---------------------------------------------------------------------------
 
 class RagSearchRequest(BaseModel):
     query: str = Field(..., description="Search query string")
@@ -65,6 +68,20 @@ class RagStatusResponse(BaseModel):
     raw_documents_dir: str
 
 
+# ---------------------------------------------------------------------------
+# Health Check
+# ---------------------------------------------------------------------------
+
+class HealthCheckResponse(BaseModel):
+    status: str
+    app_name: str
+    version: str
+    environment: str
+    llm_provider: str
+    primary_model: str
+    rag_indexed_chunks: int
+
+
 @router.get("/health", response_model=HealthCheckResponse)
 def health_check():
     """Returns application health and configuration metadata."""
@@ -75,89 +92,82 @@ def health_check():
         environment=settings.environment,
         llm_provider=settings.llm_provider,
         primary_model=settings.primary_model,
+        rag_indexed_chunks=_retriever.count(),
     )
 
 
-@router.post("/api/chat", response_model=ComposedResponse)
+# ---------------------------------------------------------------------------
+# Chat Endpoint — Main orchestration pipeline
+# ---------------------------------------------------------------------------
+
+@router.post("/api/chat", response_model=ChatResponse)
 def chat_endpoint(request: ChatRequest):
-    """Main orchestration endpoint for DeadlockTutorLLM."""
+    """Main DeadlockTutorLLM chat endpoint.
+
+    Accepts a student query (and optional structured solver inputs), routes it,
+    runs the appropriate backend (RAG / solver), calls the LLM, and returns a
+    composed teaching response with citations and solver trace.
+
+    Request body:
+        query                  : Student's question (required)
+        banker_state           : BankerStateInput for numerical safety queries (optional)
+        resource_request       : ResourceRequestInput for request algorithm (optional)
+        single_instance_graph  : Wait-for graph for cycle detection (optional)
+        multi_instance_detection: Matrix inputs for multi-instance detection (optional)
+
+    Returns:
+        ChatResponse with answer, category, sources, solver_result, grounded flag.
+    """
     try:
-        routing = query_router.route(request.message)
-
-        retrieval_res = None
-        solver_res = None
-
-        if routing.category == QueryCategory.THEORY:
-            retrieval_res = retriever.retrieve(request.message)
-            prompt = f"Student Question: {request.message}\nContext: {retrieval_res.chunks}"
-        elif routing.category == QueryCategory.NUMERICAL:
-            if request.banker_state:
-                solver_res = safety_check(request.banker_state)
-            prompt = f"Numerical Problem: {request.message}\nSolver Trace: {solver_res}"
-        else:
-            prompt = f"Problem: {request.message}"
-
-        llm_response = llm.generate(LLMRequest(prompt=prompt))
-
-        final_response = composer.compose(
-            routing=routing,
-            llm_text=llm_response.content,
-            retrieval=retrieval_res,
-            solver_result=solver_res,
-            model_name=llm_response.model_name,
-        )
-        return final_response
-
+        return _orchestrator.handle(request)
     except ValueError as ve:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
-# =====================================================================
+# ---------------------------------------------------------------------------
 # RAG Endpoints
-# Grounded document retrieval & syllabus citation indexing
-# =====================================================================
+# ---------------------------------------------------------------------------
 
 @router.post("/api/rag/ingest")
 def run_rag_ingest():
     """Triggers ingestion of documents in kb/raw/, chunks them, and builds vector index."""
     try:
-        count = retriever.index_raw_documents()
+        count = _retriever.index_raw_documents()
         return {
             "status": "success",
             "message": f"Successfully ingested and indexed {count} document chunks into vector database.",
-            "indexed_chunks": count
+            "indexed_chunks": count,
         }
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
 @router.post("/api/rag/search", response_model=RetrievalResult)
 def run_rag_search(req: RagSearchRequest):
     """Retrieves top-k relevant course chunks and source citations for a query."""
     try:
-        return retriever.retrieve(query=req.query, top_k=req.top_k)
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+        return _retriever.retrieve(query=req.query, top_k=req.top_k)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
 @router.get("/api/rag/status", response_model=RagStatusResponse)
 def get_rag_status():
     """Returns status and statistics of the local RAG knowledge base."""
     return RagStatusResponse(
-        indexed_chunks=retriever.count(),
+        indexed_chunks=_retriever.count(),
         vector_db_type=settings.vector_db_type,
-        embedding_dimension=retriever.embedding_model.dimension,
+        embedding_dimension=_retriever.embedding_model.dimension,
         index_path=str(settings.vector_db_path),
         raw_documents_dir=str(settings.kb_raw_dir),
     )
 
 
-# =====================================================================
-# Deterministic Solver Endpoints
-# Pure symbolic computation - NO LLM, NO RAG, NO external services
-# =====================================================================
+# ---------------------------------------------------------------------------
+# Deterministic Solver Endpoints (unchanged from Phase 2)
+# ---------------------------------------------------------------------------
 
 @router.post("/api/solver/safety", response_model=BankerSafetyResult)
 @router.post("/api/solver/banker-safety", response_model=BankerSafetyResult)
