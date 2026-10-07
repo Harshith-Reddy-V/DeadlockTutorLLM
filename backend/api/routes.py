@@ -1,11 +1,13 @@
 """FastAPI Application Routes."""
 
+from typing import List, Optional
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from backend.config.settings import settings
 from backend.router.query_router import QueryRouter, QueryCategory
-from backend.rag.retriever import BaseRetriever
+from backend.rag.retriever import BaseRetriever, RetrievalResult, ScoredChunk
+from backend.rag.ingestion import IngestionReport
 from backend.solver.engine import (
     safety_check,
     request_check,
@@ -44,6 +46,23 @@ class HealthCheckResponse(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., description="Student query or problem statement")
     banker_state: BankerStateInput = Field(default=None, description="Optional structured state for numerical questions")
+
+
+# =====================================================================
+# RAG Schemas
+# =====================================================================
+
+class RagSearchRequest(BaseModel):
+    query: str = Field(..., description="Search query string")
+    top_k: Optional[int] = Field(default=settings.top_k_retrieval, ge=1, le=20)
+
+
+class RagStatusResponse(BaseModel):
+    indexed_chunks: int
+    vector_db_type: str
+    embedding_dimension: int
+    index_path: str
+    raw_documents_dir: str
 
 
 @router.get("/health", response_model=HealthCheckResponse)
@@ -93,6 +112,46 @@ def chat_endpoint(request: ChatRequest):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+# =====================================================================
+# RAG Endpoints
+# Grounded document retrieval & syllabus citation indexing
+# =====================================================================
+
+@router.post("/api/rag/ingest")
+def run_rag_ingest():
+    """Triggers ingestion of documents in kb/raw/, chunks them, and builds vector index."""
+    try:
+        count = retriever.index_raw_documents()
+        return {
+            "status": "success",
+            "message": f"Successfully ingested and indexed {count} document chunks into vector database.",
+            "indexed_chunks": count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/api/rag/search", response_model=RetrievalResult)
+def run_rag_search(req: RagSearchRequest):
+    """Retrieves top-k relevant course chunks and source citations for a query."""
+    try:
+        return retriever.retrieve(query=req.query, top_k=req.top_k)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/api/rag/status", response_model=RagStatusResponse)
+def get_rag_status():
+    """Returns status and statistics of the local RAG knowledge base."""
+    return RagStatusResponse(
+        indexed_chunks=retriever.count(),
+        vector_db_type=settings.vector_db_type,
+        embedding_dimension=retriever.embedding_model.dimension,
+        index_path=str(settings.vector_db_path),
+        raw_documents_dir=str(settings.kb_raw_dir),
+    )
 
 
 # =====================================================================

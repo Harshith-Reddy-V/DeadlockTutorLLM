@@ -38,7 +38,7 @@ Theory/Concepts                Numerical Problems             Graph / Lab
    │                              │                              │
    ▼                              ▼                              ▼
 RAG Pipeline                   Symbolic Solver                Cycle Analysis &
-(BGE-Large Embeddings +        (Banker's Safety,              Concurrency Lab
+(BGE / Deterministic Embeds +  (Banker's Safety,              Concurrency Lab
 FAISS Vector Store)            Resource-Request Engine)       (POSIX Threads)
    │                              │                              │
    └──────────────┬───────────────┴──────────────────────────────┘
@@ -63,8 +63,8 @@ FAISS Vector Store)            Resource-Request Engine)       (POSIX Threads)
 
 - **Backend**: Python 3.10+, FastAPI, Uvicorn, Pydantic v2
 - **Frontend**: Streamlit
-- **Deterministic Solver**: Symbolic matrix computation & graph algorithms
-- **RAG & Vector Search**: BAAI/bge-large-en embeddings, FAISS / ChromaDB
+- **Deterministic Solver**: Pure Python matrix reduction, Banker's algorithms, DFS cycle detection
+- **RAG & Vector Search**: `pypdf`, `python-pptx`, native `faiss-cpu` (with NumPy dot-product fallback), `BAAI/bge-large-en` / `DeterministicEmbedding`
 - **LLM Engine**: Qwen 2.5/3 14B (Primary), Llama 3.1 8B (Fallback), with Mock Provider for lightweight local CPU development
 - **Testing**: Pytest
 
@@ -77,15 +77,17 @@ DeadlockTutorLLM/
 ├── backend/
 │   ├── api/
 │   │   ├── __init__.py
-│   │   └── routes.py              # FastAPI endpoints (chat, health, solver direct)
+│   │   └── routes.py              # FastAPI endpoints (chat, health, solver, rag)
 │   ├── solver/
 │   │   ├── __init__.py
 │   │   ├── models.py              # Pydantic schemas for states, traces, matrices
 │   │   └── engine.py              # Deterministic deadlock algorithms
 │   ├── rag/
 │   │   ├── __init__.py
-│   │   ├── ingestion.py           # Document parsing, cleaning, and chunking
-│   │   └── retriever.py           # Vector index retriever & citation grounder
+│   │   ├── ingestion.py           # Document parsing (PDF/PPTX), cleaning, and chunking
+│   │   ├── embeddings.py          # BGE-Large and deterministic unit-normalized embeddings
+│   │   ├── vector_store.py        # FAISS IndexFlatIP & NumPy fallback vector stores
+│   │   └── retriever.py           # Grounded vector retriever & citation generator
 │   ├── router/
 │   │   ├── __init__.py
 │   │   └── query_router.py        # Intent classifier (theory, numerical, graph, lab)
@@ -101,20 +103,23 @@ DeadlockTutorLLM/
 ├── frontend/
 │   └── app.py                     # Streamlit chat & tutoring interface
 ├── kb/
-│   ├── raw/                       # Course PDFs, lecture slides, question banks
-│   ├── processed/                 # FAISS vector database & chunk storage
-│   └── metadata/                  # Document catalogs & source mappings
+│   ├── raw/                       # Place course PDFs, lecture slides, question banks here
+│   ├── processed/                 # FAISS vector database (faiss_index.faiss) & chunks.json
+│   └── metadata/                  # Document catalogs (catalog.json) & source mappings
 ├── finetune_data/                 # Alpaca-format instruction-tuning dataset
 ├── evaluation/                    # Benchmarks & evaluation test suites
 ├── tests/                         # Pytest test suite
 │   ├── test_health.py             # Health & API route tests
 │   ├── test_router.py             # Query classification tests
-│   └── test_solver_stub.py        # Solver matrix operations & validation tests
+│   ├── test_solver.py             # Exhaustive solver algorithm tests (Cases A-K)
+│   ├── test_api_solver.py         # Solver HTTP endpoints tests
+│   └── test_rag.py                # Document parsing, chunking, FAISS, and retrieval tests
 ├── scripts/
-│   └── run_dev.py                 # Multi-service development launcher
+│   ├── run_dev.py                 # Multi-service development launcher
+│   └── ingest_kb.py               # CLI tool to ingest raw documents into FAISS
 ├── docs/
 │   └── architecture.md            # Detailed technical architecture design
-├── requirements.txt               # Phase 1 minimal dependencies
+├── requirements.txt               # Project dependencies
 ├── .env.example                   # Environment variable template
 ├── .gitignore                     # Git ignore rules for AI/Python
 ├── README.md                      # Project documentation
@@ -127,7 +132,7 @@ DeadlockTutorLLM/
 
 ### 1. Clone the repository and checkout feature branch
 ```bash
-git clone https://github.com/<your-username>/DeadlockTutorLLM.git
+git clone https://github.com/Harshith-Reddy-V/DeadlockTutorLLM.git
 cd DeadlockTutorLLM
 git checkout harshith-dev
 ```
@@ -157,7 +162,38 @@ cp .env.example .env
 
 ---
 
-## 6. How to Run
+## 6. How to Build & Use the RAG Knowledge Base
+
+### 1. Adding Syllabus Documents
+Place course materials (textbooks, lecture slides, lab manuals) into:
+```
+kb/raw/
+```
+Supported formats: `.pdf`, `.pptx`, `.ppt`, `.txt`, `.md`.
+
+### 2. Running Ingestion
+Run the ingestion CLI script:
+```bash
+python scripts/ingest_kb.py
+```
+This extracts text, reconciles hyphens/whitespace, chunks with sliding overlap, and builds the dense vector index under `kb/processed/`.
+
+Alternatively, trigger ingestion via the API endpoint:
+```bash
+curl -X POST http://127.0.0.1:8000/api/rag/ingest
+```
+
+### 3. Searching the Knowledge Base
+Query relevant chunks and citations via the API:
+```bash
+curl -X POST http://127.0.0.1:8000/api/rag/search \
+     -H "Content-Type: application/json" \
+     -d '{"query": "What are the four Coffman conditions?", "top_k": 4}'
+```
+
+---
+
+## 7. How to Run Applications
 
 ### Run Backend (FastAPI)
 ```bash
@@ -166,6 +202,7 @@ python main.py
 - API will be accessible at: `http://127.0.0.1:8000`
 - Interactive OpenAPI Docs: `http://127.0.0.1:8000/docs`
 - Health Check: `http://127.0.0.1:8000/health`
+- RAG Status: `http://127.0.0.1:8000/api/rag/status`
 
 ### Run Frontend (Streamlit)
 In a separate terminal (with `.venv` activated):
@@ -176,20 +213,20 @@ streamlit run frontend/app.py
 
 ---
 
-## 7. How to Run Tests
+## 8. How to Run Tests
 
-Execute unit tests with Pytest:
+Execute the complete test suite with Pytest:
 ```bash
 pytest -v
 ```
 
 ---
 
-## 8. Development Roadmap
+## 9. Development Roadmap
 
-- [x] **Phase 1: Project Foundation & Architecture** (Current)
-- [ ] **Phase 2: Deterministic Deadlock Solver** (Banker's Safety, Resource-Request, Cycle Detection, Multi-instance Reduction)
-- [ ] **Phase 3: RAG Knowledge Base** (PDF/PPTX ingestion, BGE-Large embeddings, FAISS indexing, Citations)
+- [x] **Phase 1: Project Foundation & Architecture**
+- [x] **Phase 2: Deterministic Deadlock Solver** (Banker's Safety, Resource-Request, Cycle Detection, Multi-instance Reduction)
+- [x] **Phase 3: RAG Knowledge Base** (PDF/PPTX ingestion, BGE/Deterministic embeddings, FAISS indexing, Citations, Groundedness)
 - [ ] **Phase 4: LLM Integration** (Qwen 14B / Fallback Llama 3.1 8B, Prompt engineering, Context injection)
 - [ ] **Phase 5: Query Router & Response Composer** (Pipeline orchestration)
 - [ ] **Phase 6: Interactive Streamlit UI** (Trace visualization, practice mode, graph rendering)

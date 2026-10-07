@@ -29,10 +29,14 @@ class AppSettings(BaseModel):
     llm_api_key: str = os.getenv("LLM_API_KEY", "")
 
     # RAG Settings
+    embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "mock")  # 'mock', 'sentence-transformers'
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-en")
     vector_db_type: str = os.getenv("VECTOR_DB_TYPE", "faiss")
     vector_db_path: Path = BASE_DIR / os.getenv("VECTOR_DB_PATH", "kb/processed/faiss_index")
     top_k_retrieval: int = int(os.getenv("TOP_K_RETRIEVAL", "5"))
+    relevance_threshold: float = float(os.getenv("RELEVANCE_THRESHOLD", "0.25"))
+    chunk_size: int = int(os.getenv("CHUNK_SIZE", "400"))
+    chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", "50"))
 
     # KB Paths
     kb_raw_dir: Path = BASE_DIR / os.getenv("KB_RAW_DIR", "kb/raw")
