@@ -1,6 +1,6 @@
 """FastAPI Application Routes."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from backend.config.settings import settings
@@ -89,29 +89,52 @@ def chat_endpoint(request: ChatRequest):
         )
         return final_response
 
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
+# =====================================================================
+# Deterministic Solver Endpoints
+# Pure symbolic computation - NO LLM, NO RAG, NO external services
+# =====================================================================
+
+@router.post("/api/solver/safety", response_model=BankerSafetyResult)
 @router.post("/api/solver/banker-safety", response_model=BankerSafetyResult)
 def run_banker_safety(state: BankerStateInput):
     """Direct execution of Banker's safety algorithm."""
-    return safety_check(state)
+    try:
+        return safety_check(state)
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
 
 
+@router.post("/api/solver/request", response_model=ResourceRequestResult)
 @router.post("/api/solver/resource-request", response_model=ResourceRequestResult)
 def run_resource_request(req_input: ResourceRequestInput):
-    """Direct execution of Resource-Request algorithm."""
-    return request_check(req_input)
+    """Direct execution of Banker's Resource-Request algorithm."""
+    try:
+        return request_check(req_input)
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
 
 
+@router.post("/api/solver/detect/single", response_model=SingleInstanceDetectionResult)
 @router.post("/api/solver/detect-single", response_model=SingleInstanceDetectionResult)
 def run_detect_single(graph_input: SingleInstanceDetectionInput):
     """Direct cycle detection in single-instance wait-for graph."""
-    return detect_single_instance(graph_input)
+    try:
+        return detect_single_instance(graph_input)
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
 
 
+@router.post("/api/solver/detect/multi", response_model=MultiInstanceDetectionResult)
 @router.post("/api/solver/detect-multi", response_model=MultiInstanceDetectionResult)
 def run_detect_multi(det_input: MultiInstanceDetectionInput):
     """Direct multiple-instance matrix deadlock detection."""
-    return detect_multi_instance(det_input)
+    try:
+        return detect_multi_instance(det_input)
+    except ValueError as ve:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
