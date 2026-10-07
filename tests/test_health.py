@@ -27,13 +27,13 @@ def test_health_check_endpoint(client):
 
 def test_chat_endpoint_theory_flow(client):
     payload = {
-        "message": "Explain the Coffman conditions for deadlock."
+        "query": "Explain the Coffman conditions for deadlock."
     }
     response = client.post("/api/chat", json=payload)
     assert response.status_code == 200
     data = response.json()
     assert data["category"] == "theory"
-    assert "Coffman Conditions" in data["explanation"]
+    assert "Coffman Conditions" in data["answer"]
     assert "model_used" in data
 
 

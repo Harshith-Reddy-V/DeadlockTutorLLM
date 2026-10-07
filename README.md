@@ -1,235 +1,107 @@
-# DeadlockTutorLLM
+# DeadlockTutorLLM 🔒
 
-> **A Domain-Specific AI Tutor for Operating System Deadlocks**  
-> *Combining Retrieval-Augmented Generation (RAG), Instruction-Tuning, and Deterministic Symbolic Solvers.*
+A domain-specific AI teaching assistant for Operating Systems (OS) deadlocks. Built from scratch for a university OS course, this project combines a deterministic symbolic solver, a local Retrieval-Augmented Generation (RAG) pipeline, and an LLM orchestration layer to teach students concepts, algorithms, graphs, and labs safely and accurately.
 
----
-
-## 1. Problem Statement
-
-Operating Systems deadlocks are a core undergraduate computer science concept comprising theoretical criteria (Coffman conditions, prevention vs. avoidance), multi-step algebraic algorithms (Banker's Safety & Resource-Request algorithms), and state graph models (Resource Allocation Graphs and Wait-For Graphs). 
-
-General-purpose Large Language Models (LLMs) struggle as reliable educational tutors in this domain due to two critical issues:
-1. **Numerical Hallucination**: Generative models frequently calculate matrix differences ($Need = Max - Allocation$) and multi-step resource updates ($Work = Work + Allocation$) incorrectly, leading to invalid safe sequences or false safety guarantees.
-2. **Pedagogical Inconsistency & Lack of Syllabus Grounding**: Generic chat models fail to anchor their explanations to prescribed university course material and blur critical theoretical distinctions (e.g., treating an **UNSAFE state** as synonymous with **DEADLOCK**).
+**Current Phase:** Phase 4 (LLM Integration and End-to-End Orchestration)
 
 ---
 
-## 2. Core Architecture & Design Principles
+## 🌟 Key Features
 
-DeadlockTutorLLM addresses these challenges with a tri-part architectural separation of concerns:
+1. **Deterministic Deadlock Solver**
+   - Banker's Algorithm (Safety & Resource-Request)
+   - Cycle detection for Single-Instance Wait-For Graphs (WFG)
+   - Matrix-based Multi-Instance Deadlock Detection
+   - *Crucially, the LLM NEVER performs matrix arithmetic. It only explains the solver's verified trace.*
 
-- **RAG controls WHAT the system knows**: Grounds conceptual explanations strictly in verified course slides, textbooks (e.g. Silberschatz), and faculty question banks with explicit page/slide citations.
-- **Deterministic Solver guarantees NUMERICAL CORRECTNESS**: Executes all algebraic calculations (Banker's algorithm, Resource-Request, and graph cycle detection) with 100% mathematical precision.
-- **Fine-Tuning controls HOW the system teaches**: Guides pedagogical behavior—enforcing step-by-step scaffolding, hint-first tutoring, misconception correction, and college examination coaching.
+2. **Course-Grounded RAG Pipeline**
+   - Ingests PDFs and PPTX files directly into chunks.
+   - Vector search (FAISS + BGE embeddings).
+   - Strict Grounding: If the knowledge base lacks sufficient context, the tutor explicitly alerts the student that the answer is not grounded in the syllabus.
 
-```
-Student
-   │
-   ▼
-Chat Interface (Streamlit)
-   │
-   ▼
-FastAPI Gateway & Query Router
-   │
-   ├──────────────────────────────┬──────────────────────────────┐
-   ▼                              ▼                              ▼
-Theory/Concepts                Numerical Problems             Graph / Lab
-   │                              │                              │
-   ▼                              ▼                              ▼
-RAG Pipeline                   Symbolic Solver                Cycle Analysis &
-(BGE / Deterministic Embeds +  (Banker's Safety,              Concurrency Lab
-FAISS Vector Store)            Resource-Request Engine)       (POSIX Threads)
-   │                              │                              │
-   └──────────────┬───────────────┴──────────────────────────────┘
-                  ▼
-           Prompt Assembler
-                  ▼
-        Pedagogical LLM Engine (Qwen 14B / Fallback Llama 3.1 8B)
-                  ▼
-           Response Composer
-                  │
-                  ├─► Verified step-by-step calculations
-                  ├─► Syllabus page citations
-                  ├─► Clarification of common misconceptions
-                  │
-                  ▼
-           Student Answer
-```
+3. **Intelligent Query Router & Orchestrator**
+   - Deterministically routes student queries to `THEORY`, `NUMERICAL`, `GRAPH`, or `LAB` pipelines.
+   - Automatically weaves solver traces and syllabus citations into the final LLM prompt.
+
+4. **Extensible LLM Architecture**
+   - Zero-dependency `MockLLMProvider` for blazing-fast CI testing.
+   - Native support for Ollama, OpenAI-Compatible (vLLM, LM Studio), and HuggingFace PEFT models.
+
+5. **Streamlit Frontend**
+   - Clean, academic interface.
+   - Expanders for step-by-step solver calculations and syllabus citations.
+   - Visual badges indicating query category and syllabus groundedness.
 
 ---
 
-## 3. Technology Stack
+## 🚀 Quick Start
 
-- **Backend**: Python 3.10+, FastAPI, Uvicorn, Pydantic v2
-- **Frontend**: Streamlit
-- **Deterministic Solver**: Pure Python matrix reduction, Banker's algorithms, DFS cycle detection
-- **RAG & Vector Search**: `pypdf`, `python-pptx`, native `faiss-cpu` (with NumPy dot-product fallback), `BAAI/bge-large-en` / `DeterministicEmbedding`
-- **LLM Engine**: Qwen 2.5/3 14B (Primary), Llama 3.1 8B (Fallback), with Mock Provider for lightweight local CPU development
-- **Testing**: Pytest
-
----
-
-## 4. Project Structure
-
-```
-DeadlockTutorLLM/
-├── backend/
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── routes.py              # FastAPI endpoints (chat, health, solver, rag)
-│   ├── solver/
-│   │   ├── __init__.py
-│   │   ├── models.py              # Pydantic schemas for states, traces, matrices
-│   │   └── engine.py              # Deterministic deadlock algorithms
-│   ├── rag/
-│   │   ├── __init__.py
-│   │   ├── ingestion.py           # Document parsing (PDF/PPTX), cleaning, and chunking
-│   │   ├── embeddings.py          # BGE-Large and deterministic unit-normalized embeddings
-│   │   ├── vector_store.py        # FAISS IndexFlatIP & NumPy fallback vector stores
-│   │   └── retriever.py           # Grounded vector retriever & citation generator
-│   ├── router/
-│   │   ├── __init__.py
-│   │   └── query_router.py        # Intent classifier (theory, numerical, graph, lab)
-│   ├── composer/
-│   │   ├── __init__.py
-│   │   └── response_composer.py   # Final student answer synthesizer
-│   ├── llm/
-│   │   ├── __init__.py
-│   │   └── provider.py            # LLM abstraction (Mock, Ollama, HuggingFace)
-│   └── config/
-│       ├── __init__.py
-│       └── settings.py            # Environment & app configuration
-├── frontend/
-│   └── app.py                     # Streamlit chat & tutoring interface
-├── kb/
-│   ├── raw/                       # Place course PDFs, lecture slides, question banks here
-│   ├── processed/                 # FAISS vector database (faiss_index.faiss) & chunks.json
-│   └── metadata/                  # Document catalogs (catalog.json) & source mappings
-├── finetune_data/                 # Alpaca-format instruction-tuning dataset
-├── evaluation/                    # Benchmarks & evaluation test suites
-├── tests/                         # Pytest test suite
-│   ├── test_health.py             # Health & API route tests
-│   ├── test_router.py             # Query classification tests
-│   ├── test_solver.py             # Exhaustive solver algorithm tests (Cases A-K)
-│   ├── test_api_solver.py         # Solver HTTP endpoints tests
-│   └── test_rag.py                # Document parsing, chunking, FAISS, and retrieval tests
-├── scripts/
-│   ├── run_dev.py                 # Multi-service development launcher
-│   └── ingest_kb.py               # CLI tool to ingest raw documents into FAISS
-├── docs/
-│   └── architecture.md            # Detailed technical architecture design
-├── requirements.txt               # Project dependencies
-├── .env.example                   # Environment variable template
-├── .gitignore                     # Git ignore rules for AI/Python
-├── README.md                      # Project documentation
-└── main.py                        # FastAPI entrypoint
-```
-
----
-
-## 5. Installation Instructions
-
-### 1. Clone the repository and checkout feature branch
+### 1. Installation
+Clone the repository and install dependencies in a virtual environment:
 ```bash
-git clone https://github.com/Harshith-Reddy-V/DeadlockTutorLLM.git
-cd DeadlockTutorLLM
-git checkout harshith-dev
-```
-
-### 2. Create and activate a virtual environment
-```bash
-# Windows (PowerShell)
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-# Linux / macOS
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-### 3. Install dependencies
-```bash
+source .venv/Scripts/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 4. Configure environment variables
-Copy `.env.example` to `.env`:
+### 2. Environment Configuration
+Copy the configuration template:
 ```bash
 cp .env.example .env
 ```
-*(On Windows PowerShell: `Copy-Item .env.example .env`)*
+By default, the `.env` uses the `mock` LLM provider and `mock` embedding provider. This is intentional to ensure the system boots instantly without large downloads. To use real models, edit `.env` to point to an active Ollama or LM Studio instance.
 
----
-
-## 6. How to Build & Use the RAG Knowledge Base
-
-### 1. Adding Syllabus Documents
-Place course materials (textbooks, lecture slides, lab manuals) into:
-```
-kb/raw/
-```
-Supported formats: `.pdf`, `.pptx`, `.ppt`, `.txt`, `.md`.
-
-### 2. Running Ingestion
-Run the ingestion CLI script:
+### 3. Ingesting Course Material (Optional)
+Place PDFs or PPTX files into `kb/raw/` and run:
 ```bash
 python scripts/ingest_kb.py
 ```
-This extracts text, reconciles hyphens/whitespace, chunks with sliding overlap, and builds the dense vector index under `kb/processed/`.
 
-Alternatively, trigger ingestion via the API endpoint:
+### 4. Running the Application
+You must start both the backend API and the frontend UI.
+
+**Start the FastAPI Backend (Terminal 1):**
 ```bash
-curl -X POST http://127.0.0.1:8000/api/rag/ingest
+uvicorn main:app --reload --port 8000
 ```
 
-### 3. Searching the Knowledge Base
-Query relevant chunks and citations via the API:
+**Start the Streamlit Frontend (Terminal 2):**
 ```bash
-curl -X POST http://127.0.0.1:8000/api/rag/search \
-     -H "Content-Type: application/json" \
-     -d '{"query": "What are the four Coffman conditions?", "top_k": 4}'
+streamlit run frontend/app.py --server.port 8501
 ```
+Open `http://localhost:8501` in your browser.
 
 ---
 
-## 7. How to Run Applications
+## 🧪 Testing
 
-### Run Backend (FastAPI)
-```bash
-python main.py
-```
-- API will be accessible at: `http://127.0.0.1:8000`
-- Interactive OpenAPI Docs: `http://127.0.0.1:8000/docs`
-- Health Check: `http://127.0.0.1:8000/health`
-- RAG Status: `http://127.0.0.1:8000/api/rag/status`
+The test suite runs entirely offline (using the Mock LLM and deterministic embedding logic) in seconds. It requires NO model downloads and NO API keys.
 
-### Run Frontend (Streamlit)
-In a separate terminal (with `.venv` activated):
 ```bash
-streamlit run frontend/app.py
+pytest tests/ -v
 ```
-- Web interface will open at: `http://localhost:8501`
+*(Currently 51/51 tests passing)*
 
 ---
 
-## 8. How to Run Tests
+## 🏗️ Architecture
 
-Execute the complete test suite with Pytest:
-```bash
-pytest -v
-```
+Read the full architecture spec in [docs/architecture.md](docs/architecture.md).
+
+### The Pipeline
+1. **Student Input** → `/api/chat`
+2. **Query Router** → Classifies as `THEORY`, `NUMERICAL`, `GRAPH`, or `LAB`.
+3. **Dispatcher** → 
+   - Queries RAG vector store for `THEORY` / `LAB`.
+   - Executes deterministic matrices/DFS for `NUMERICAL` / `GRAPH`.
+4. **Prompt Assembly** → Merges data.
+5. **LLM Generation** → Explains the data.
+6. **Response Composer** → Structures the output with citations and step-by-step traces.
 
 ---
 
-## 9. Development Roadmap
+## 🚧 Limitations & Future Work
 
-- [x] **Phase 1: Project Foundation & Architecture**
-- [x] **Phase 2: Deterministic Deadlock Solver** (Banker's Safety, Resource-Request, Cycle Detection, Multi-instance Reduction)
-- [x] **Phase 3: RAG Knowledge Base** (PDF/PPTX ingestion, BGE/Deterministic embeddings, FAISS indexing, Citations, Groundedness)
-- [ ] **Phase 4: LLM Integration** (Qwen 14B / Fallback Llama 3.1 8B, Prompt engineering, Context injection)
-- [ ] **Phase 5: Query Router & Response Composer** (Pipeline orchestration)
-- [ ] **Phase 6: Interactive Streamlit UI** (Trace visualization, practice mode, graph rendering)
-- [ ] **Phase 7: Instruction Fine-Tuning Dataset** (1,000–3,000 verified pedagogical examples)
-- [ ] **Phase 8: LoRA / QLoRA Fine-Tuning** (Subject to GPU availability)
-- [ ] **Phase 9: Comprehensive Evaluation** (Benchmarked against Base LLM across 100+ verified test questions)
+- **Fine-Tuning:** The architecture contains integration points for a QLoRA fine-tuned pedagogical adapter, but the models have not yet been fine-tuned (Phase 5 planned).
+- **Concurrency:** Currently optimized for local, single-user operation.
+- **Vision:** Graph detection relies on manual edge inputs; future iterations could include a vision model for drawing analysis.
