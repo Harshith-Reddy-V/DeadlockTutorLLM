@@ -53,6 +53,7 @@ class ComposedResponse(BaseModel):
     citations: List[Citation] = []
     numerical_result: Optional[Any] = None
     graph_data: Optional[Any] = None
+    graph_diagram: Optional[str] = None
     teaching_notes: List[str] = []
     model_used: str
 
@@ -90,6 +91,7 @@ class ResponseComposer:
         teaching_notes: List[str] = []
         numerical_result = None
         graph_data = None
+        graph_diagram = None
 
         # ------------------------------------------------------------------
         # 1. Ingest citations from RAG retrieval
@@ -182,6 +184,30 @@ class ResponseComposer:
                     "📌 In single-instance resource systems: deadlock ↔ cycle exists in the Wait-For Graph."
                 )
 
+                mermaid_lines = ["graph TD"]
+                for edge in solver_result.input_edges:
+                    u, v = edge[0], edge[1]
+                    in_cycle = False
+                    for cycle in solver_result.cycles:
+                        for i in range(len(cycle)):
+                            if u == cycle[i] and v == cycle[(i+1)%len(cycle)]:
+                                in_cycle = True
+                                break
+                        if in_cycle: break
+                    
+                    if in_cycle:
+                        mermaid_lines.append(f"  {u} -->|waits for| {v}")
+                        mermaid_lines.append(f"  style {u} fill:#f99,stroke:#333,stroke-width:2px")
+                        mermaid_lines.append(f"  style {v} fill:#f99,stroke:#333,stroke-width:2px")
+                    else:
+                        mermaid_lines.append(f"  {u} -->|waits for| {v}")
+                
+                for node in solver_result.input_nodes:
+                    if not any(node in edge for edge in solver_result.input_edges):
+                        mermaid_lines.append(f"  {node}")
+
+                graph_diagram = "\n".join(mermaid_lines)
+
             elif isinstance(solver_result, MultiInstanceDetectionResult):
                 graph_data = solver_result.model_dump()
                 state_icon = "🔴" if solver_result.is_deadlocked else "✅"
@@ -226,6 +252,7 @@ class ResponseComposer:
             citations=citations,
             numerical_result=numerical_result,
             graph_data=graph_data,
+            graph_diagram=graph_diagram,
             teaching_notes=teaching_notes,
             model_used=model_name,
         )

@@ -12,3 +12,11 @@ pytest>=8.0.0
 pypdf>=4.0.0
 python-pptx>=1.0.0
 faiss-cpu>=1.8.0
+
+# Phase 5 - Fine-Tuning
+transformers>=4.40.0
+peft>=0.10.0
+trl>=0.8.0
+bitsandbytes>=0.43.0
+datasets>=2.18.0
+accelerate>=0.29.0

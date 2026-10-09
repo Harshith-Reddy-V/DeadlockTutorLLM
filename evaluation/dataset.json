@@ -1,0 +1,44 @@
+[
+  {
+    "id": "T1",
+    "category": "theory",
+    "query": "What are the four necessary Coffman conditions for deadlock?",
+    "expected_keywords": ["mutual exclusion", "hold and wait", "no preemption", "circular wait"]
+  },
+  {
+    "id": "T2",
+    "category": "theory",
+    "query": "Does an unsafe state guarantee that a deadlock has occurred?",
+    "expected_keywords": ["no", "guarantee", "might", "could", "prevent"]
+  },
+  {
+    "id": "N1",
+    "category": "numerical",
+    "query": "We have 3 processes P0, P1, P2 and 3 resources A, B, C. Available is [3, 3, 2]. Allocation for P0 is [0, 1, 0], Max is [7, 5, 3]. Allocation for P1 is [2, 0, 0], Max is [3, 2, 2]. Allocation for P2 is [3, 0, 2], Max is [9, 0, 2]. What is the Need matrix and is the system in a safe state?",
+    "expected_keywords": ["safe state", "P1", "P0", "P2", "need matrix"]
+  },
+  {
+    "id": "G1",
+    "category": "graph",
+    "query": "Detect cycles in this wait-for graph: nodes are [\"P1\", \"P2\", \"P3\"]. Edges are [[\"P1\", \"P2\"], [\"P2\", \"P3\"], [\"P3\", \"P1\"]].",
+    "expected_keywords": ["cycle", "deadlock", "P1", "P2", "P3"]
+  },
+  {
+    "id": "G2",
+    "category": "graph",
+    "query": "Detect cycles in this wait-for graph: nodes are [\"P1\", \"P2\", \"P3\"]. Edges are [[\"P1\", \"P2\"], [\"P2\", \"P3\"]].",
+    "expected_keywords": ["no deadlock", "acyclic", "no cycle"]
+  },
+  {
+    "id": "L1",
+    "category": "lab",
+    "query": "How can I prevent deadlock when acquiring two pthread mutexes?",
+    "expected_keywords": ["order", "lock ordering", "same order"]
+  },
+  {
+    "id": "O1",
+    "category": "out_of_domain",
+    "query": "What is the capital of France?",
+    "expected_keywords": ["Paris", "not related", "operating system"]
+  }
+]

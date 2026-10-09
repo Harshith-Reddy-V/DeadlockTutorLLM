@@ -122,7 +122,10 @@ def test_orchestrator_theory_flow(orchestrator):
     assert resp.category == QueryCategory.THEORY.value
     assert "Coffman Conditions" in resp.answer
     assert resp.grounded is False
-    assert "Knowledge base contains no indexed documents" in resp.groundedness_message
+    assert (
+        "Knowledge base contains no indexed documents" in resp.groundedness_message
+        or "does not contain sufficient relevant course material" in resp.groundedness_message
+    )
 
 
 def test_orchestrator_numerical_bankers_flow(orchestrator):

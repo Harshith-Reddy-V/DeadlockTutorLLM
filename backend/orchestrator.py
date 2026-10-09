@@ -92,6 +92,7 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[SourceCitation] = Field(default_factory=list)
     solver_result: Optional[Dict[str, Any]] = None
+    graph_diagram: Optional[str] = None
     grounded: bool
     groundedness_message: str
     teaching_notes: List[str] = Field(default_factory=list)
@@ -293,7 +294,7 @@ class DeadlockTutorOrchestrator:
                 retrieval, solver_result, prompt = self._handle_lab(request)
 
             # LLM call
-            llm_resp = self._call_llm(prompt, request)
+            llm_resp = self._call_llm(prompt, request, category, retrieval, solver_result)
 
         except Exception as exc:
             logger.exception("Orchestrator pipeline error for query '%s': %s", request.query, exc)
@@ -327,6 +328,7 @@ class DeadlockTutorOrchestrator:
             answer=llm_resp.content,
             sources=sources,
             solver_result=solver_result.model_dump() if hasattr(solver_result, "model_dump") else None,
+            graph_diagram=composed.graph_diagram,
             grounded=grounded,
             groundedness_message=groundedness_message,
             teaching_notes=composed.teaching_notes,
@@ -397,9 +399,29 @@ class DeadlockTutorOrchestrator:
     # LLM call with graceful fallback
     # ------------------------------------------------------------------
 
-    def _call_llm(self, prompt: str, request: ChatRequest) -> LLMResponse:
+    def _call_llm(self, prompt: str, request: ChatRequest, category: QueryCategory, retrieval: Optional[RetrievalResult], solver_result: Any) -> LLMResponse:
+        system_prompt = (
+            "You are DeadlockTutorLLM, a specialized tutor for Operating Systems deadlocks. "
+            "Always teach step-by-step. "
+            f"Current Query Category: {category.value.upper()}.\n\n"
+            "STRICT RULES:\n"
+            "1. Do not invent numerical results.\n"
+            "2. Use deterministic solver output as authoritative.\n"
+            "3. For RAG questions: Answer using the retrieved course material and cite sources.\n"
+            "4. For unsupported questions: Clearly state that sufficient course material was not found."
+        )
+
+        context_text = None
+        if retrieval and retrieval.chunks:
+            context_text = "\n\n---\n\n".join(
+                f"[{chunk.citation}]\n{chunk.content}"
+                for chunk in retrieval.chunks[:settings.top_k_retrieval]
+            )
+
         llm_request = LLMRequest(
             prompt=prompt,
+            system_prompt=system_prompt,
+            context=context_text,
             temperature=settings.llm_temperature,
             max_tokens=settings.llm_max_tokens,
         )

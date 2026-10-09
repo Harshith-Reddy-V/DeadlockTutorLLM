@@ -411,6 +411,8 @@ def detect_single_instance(graph_input: SingleInstanceDetectionInput) -> SingleI
         deadlocked_processes=deadlocked_processes,
         trace=trace,
         message=msg,
+        input_nodes=list(graph_input.nodes),
+        input_edges=[list(edge) for edge in graph_input.edges],
     )
 
 
