@@ -9,5 +9,6 @@ The primary objective of fine-tuning is **not** to teach the LLM factual OS know
 3. Obey the numbers output by the deterministic solver rather than inventing math.
 
 ## Files
-- `sample.jsonl`: A curated set of instruction-input-output pairs formatted for causal language modeling.
+- `sample.jsonl`: A small illustrative set of instruction-input-output examples demonstrating the expected schema. 
+  > ⚠️ **Note**: This sample file is intended exclusively for pipeline validation and schema testing. It is **not** sufficient in size or diversity for production fine-tuning (which typically requires 1,000–3,000 curated examples).
 - `scripts/train_lora.py`: The QLoRA training script using the `trl` and `peft` libraries to generate the final adapter.

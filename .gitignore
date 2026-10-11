@@ -66,9 +66,11 @@ models/
 *.safetensors
 *.onnx
 finetune_data/*.jsonl
+!finetune_data/sample.jsonl
 !finetune_data/sample_*.jsonl
 !finetune_data/README.md
 
-# Logs
+# Logs & Evaluation outputs
 *.log
 logs/
+evaluation/results.json

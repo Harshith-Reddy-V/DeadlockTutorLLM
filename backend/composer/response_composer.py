@@ -19,7 +19,7 @@ Teaching style guide (applied in compose()):
 
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Set
 
 from pydantic import BaseModel
 
@@ -184,29 +184,36 @@ class ResponseComposer:
                     "📌 In single-instance resource systems: deadlock ↔ cycle exists in the Wait-For Graph."
                 )
 
-                mermaid_lines = ["graph TD"]
-                for edge in solver_result.input_edges:
-                    u, v = edge[0], edge[1]
-                    in_cycle = False
-                    for cycle in solver_result.cycles:
-                        for i in range(len(cycle)):
-                            if u == cycle[i] and v == cycle[(i+1)%len(cycle)]:
-                                in_cycle = True
-                                break
-                        if in_cycle: break
-                    
-                    if in_cycle:
-                        mermaid_lines.append(f"  {u} -->|waits for| {v}")
-                        mermaid_lines.append(f"  style {u} fill:#f99,stroke:#333,stroke-width:2px")
-                        mermaid_lines.append(f"  style {v} fill:#f99,stroke:#333,stroke-width:2px")
-                    else:
-                        mermaid_lines.append(f"  {u} -->|waits for| {v}")
-                
-                for node in solver_result.input_nodes:
-                    if not any(node in edge for edge in solver_result.input_edges):
-                        mermaid_lines.append(f"  {node}")
+                if solver_result.input_nodes or solver_result.input_edges:
+                    mermaid_lines = ["graph TD"]
+                    cycle_nodes: Set[str] = set()
 
-                graph_diagram = "\n".join(mermaid_lines)
+                    for edge in solver_result.input_edges:
+                        u, v = edge[0], edge[1]
+                        in_cycle = False
+                        for cycle in solver_result.cycles:
+                            for i in range(len(cycle) - 1):
+                                if u == cycle[i] and v == cycle[i + 1]:
+                                    in_cycle = True
+                                    cycle_nodes.add(u)
+                                    cycle_nodes.add(v)
+                                    break
+                            if in_cycle:
+                                break
+
+                        if in_cycle:
+                            mermaid_lines.append(f"  {u} -->|waits for| {v}")
+                        else:
+                            mermaid_lines.append(f"  {u} -->|waits for| {v}")
+
+                    for node in cycle_nodes:
+                        mermaid_lines.append(f"  style {node} fill:#f99,stroke:#333,stroke-width:2px")
+
+                    for node in solver_result.input_nodes:
+                        if not any(node in edge for edge in solver_result.input_edges):
+                            mermaid_lines.append(f"  {node}")
+
+                    graph_diagram = "\n".join(mermaid_lines)
 
             elif isinstance(solver_result, MultiInstanceDetectionResult):
                 graph_data = solver_result.model_dump()

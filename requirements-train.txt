@@ -1,0 +1,11 @@
+# DeadlockTutorLLM - Phase 5 Fine-Tuning & Training Requirements
+# Note: QLoRA training requires a CUDA-compatible environment (Linux / WSL2 recommended).
+# Core app and tests on Windows only require base requirements.txt.
+-r requirements.txt
+
+transformers>=4.40.0
+peft>=0.10.0
+trl>=0.8.0
+bitsandbytes>=0.43.0
+datasets>=2.18.0
+accelerate>=0.29.0

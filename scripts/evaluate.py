@@ -14,9 +14,18 @@ import sys
 # Ensure backend can be imported
 sys.path.append(str(Path(__file__).parent.parent))
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 from backend.orchestrator import DeadlockTutorOrchestrator, ChatRequest
 from backend.llm.provider import get_llm_provider
 from backend.rag.retriever import BaseRetriever
+from backend.solver.models import (
+    BankerStateInput,
+    ResourceRequestInput,
+    SingleInstanceDetectionInput,
+    MultiInstanceDetectionInput,
+)
 
 
 def load_dataset(path: str):
@@ -48,16 +57,38 @@ def evaluate(dataset_path: str):
         start_time = time.time()
         try:
             # We run the full system pipeline here.
-            # (In a real ablation study, we would toggle RAG and Solver off using mocked components)
-            req = ChatRequest(query=query)
+            # Build ChatRequest with optional structured solver inputs if present in the benchmark item
+            req_kwargs = {"query": query}
+            if "banker_state" in item:
+                req_kwargs["banker_state"] = BankerStateInput(**item["banker_state"])
+            if "resource_request" in item:
+                req_kwargs["resource_request"] = ResourceRequestInput(**item["resource_request"])
+            if "single_instance_graph" in item:
+                req_kwargs["single_instance_graph"] = SingleInstanceDetectionInput(**item["single_instance_graph"])
+            if "multi_instance_detection" in item:
+                req_kwargs["multi_instance_detection"] = MultiInstanceDetectionInput(**item["multi_instance_detection"])
+
+            req = ChatRequest(**req_kwargs)
             response = orchestrator.handle(req)
             latency = time.time() - start_time
             total_latency += latency
             
-            answer = response.answer.lower()
+            # Combine LLM answer, deterministic worked steps, teaching notes,
+            # solver results, and graph diagrams into the comprehensive evaluation text
+            eval_corpus = [response.answer]
+            if response.worked_steps:
+                eval_corpus.extend(response.worked_steps)
+            if response.teaching_notes:
+                eval_corpus.extend(response.teaching_notes)
+            if response.solver_result:
+                eval_corpus.append(json.dumps(response.solver_result))
+            if response.graph_diagram:
+                eval_corpus.append(response.graph_diagram)
+
+            full_eval_text = " ".join(eval_corpus).lower()
             
-            # Check keywords for a rough accuracy metric
-            keywords_found = [kw for kw in expected_keywords if kw.lower() in answer]
+            # Check keywords across comprehensive response text
+            keywords_found = [kw for kw in expected_keywords if kw.lower() in full_eval_text]
             keyword_score = len(keywords_found) / len(expected_keywords) if expected_keywords else 1.0
             
             if keyword_score > 0.5:
