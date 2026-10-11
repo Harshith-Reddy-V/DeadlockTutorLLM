@@ -71,7 +71,7 @@ Harmonizes all outputs. Enforces pedagogical rules (e.g., automatically appendin
 ### 1. Ingestion Flow
 ```
 User-Provided Documents (kb/raw/)
-  ├── .pdf  (pypdf text extraction per page, e.g. Tanenbaum, OSTEP)
+  ├── .pdf  (pypdf text extraction per page, e.g. lecture slides or permitted textbook chapters)
   └── .pptx (python-pptx text runs extraction per slide)
             │
             ▼

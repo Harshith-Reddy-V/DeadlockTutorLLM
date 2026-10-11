@@ -50,6 +50,8 @@ htmlcov/
 
 # Knowledge Base & Vector Store indices / Large Files
 kb/raw/*
+kb/raw/*.pdf
+kb/raw/*.pptx
 !kb/raw/.gitkeep
 kb/processed/*
 !kb/processed/.gitkeep
