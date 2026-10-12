@@ -1,16 +1,12 @@
-# Evaluation Framework & Benchmark
+# Evaluation Framework
 
-This directory contains evaluation benchmarks, ground-truth questions, and performance measurement scripts for **DeadlockTutorLLM**.
+This directory contains the testing harness for Phase 8 of DeadlockTutorLLM.
 
-## Evaluation Objectives
-Evaluate and contrast 4 system configurations:
-1. **Base LLM only** (Zero-shot ungrounded LLM)
-2. **Base LLM + RAG** (Retrieval-Augmented Generation)
-3. **Base LLM + RAG + Fine-Tuning** (Instruction-tuned pedagogical style)
-4. **Full System (LLM + RAG + Deterministic Solver)** (End-to-end DeadlockTutorLLM)
+## Components
+- `dataset.json`: A manually curated test set covering Theory, Numerical, Graph, Lab, and Out-of-Domain questions.
+- `evaluate.py`: An automated script designed to run queries through the system and benchmark keyword accuracy and latency.
 
-## Target Metrics
-- **Numerical Accuracy**: Exact correctness on Banker's safety sequence and Need matrix calculations (Target: 100% via solver handoff).
-- **Groundedness & Citation Accuracy**: Percentage of factual statements strictly supported by syllabus references.
-- **Pedagogical Quality**: Step-by-step clarity, identification of student misconceptions.
-- **Latency / Response Time**: Inference latency across components.
+## Metrics
+1. **Factual Correctness**: Measured via keyword recall against the ground truth.
+2. **Numerical Grounding**: Ensured programmatically because the LLM is explicitly given the trace from the Deterministic Solver.
+3. **Resilience**: Evaluated via `tests/test_failure_modes.py` to handle empty strings, matrix mismatches, and negative requests gracefully.

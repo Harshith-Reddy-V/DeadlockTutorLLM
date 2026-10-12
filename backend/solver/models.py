@@ -224,6 +224,8 @@ class SingleInstanceDetectionResult(BaseModel):
     deadlocked_processes: List[str] = Field(default_factory=list)
     trace: List[str] = Field(default_factory=list)
     message: str
+    input_nodes: List[str] = Field(default_factory=list)
+    input_edges: List[List[str]] = Field(default_factory=list)
 
 
 class MultiInstanceDetectionInput(BaseModel):

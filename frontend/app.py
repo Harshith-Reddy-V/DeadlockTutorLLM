@@ -81,6 +81,11 @@ for msg in st.session_state["messages"]:
                     for step in meta["worked_steps"]:
                         st.markdown(f"- {step}")
             
+            # Graph Diagram
+            if meta.get("graph_diagram"):
+                with st.expander("📊 Graph Visualization"):
+                    st.markdown(f"```mermaid\n{meta['graph_diagram']}\n```")
+            
             # Citations
             if meta.get("sources"):
                 with st.expander("📚 Syllabus Citations & Sources"):
@@ -125,6 +130,7 @@ if prompt_to_send:
                     worked_steps = data.get("worked_steps", [])
                     sources = data.get("sources", [])
                     teaching_notes = data.get("teaching_notes", [])
+                    graph_diagram = data.get("graph_diagram", None)
 
                     if grounded:
                         st.caption(f"🎯 Category: **{category.upper()}** | 🟢 **Grounded**")
@@ -135,6 +141,10 @@ if prompt_to_send:
                         with st.expander("📝 Solver Calculations & Worked Steps"):
                             for step in worked_steps:
                                 st.markdown(f"- {step}")
+                                
+                    if graph_diagram:
+                        with st.expander("📊 Graph Visualization"):
+                            st.markdown(f"```mermaid\n{graph_diagram}\n```")
                                 
                     if sources:
                         with st.expander("📚 Syllabus Citations & Sources"):
@@ -158,7 +168,8 @@ if prompt_to_send:
                             "groundedness_message": groundedness_message,
                             "worked_steps": worked_steps,
                             "sources": sources,
-                            "teaching_notes": teaching_notes
+                            "teaching_notes": teaching_notes,
+                            "graph_diagram": graph_diagram
                         }
                     })
                 else:

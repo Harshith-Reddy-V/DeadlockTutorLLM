@@ -19,7 +19,7 @@ Teaching style guide (applied in compose()):
 
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Set
 
 from pydantic import BaseModel
 
@@ -53,6 +53,7 @@ class ComposedResponse(BaseModel):
     citations: List[Citation] = []
     numerical_result: Optional[Any] = None
     graph_data: Optional[Any] = None
+    graph_diagram: Optional[str] = None
     teaching_notes: List[str] = []
     model_used: str
 
@@ -90,6 +91,7 @@ class ResponseComposer:
         teaching_notes: List[str] = []
         numerical_result = None
         graph_data = None
+        graph_diagram = None
 
         # ------------------------------------------------------------------
         # 1. Ingest citations from RAG retrieval
@@ -182,6 +184,37 @@ class ResponseComposer:
                     "📌 In single-instance resource systems: deadlock ↔ cycle exists in the Wait-For Graph."
                 )
 
+                if solver_result.input_nodes or solver_result.input_edges:
+                    mermaid_lines = ["graph TD"]
+                    cycle_nodes: Set[str] = set()
+
+                    for edge in solver_result.input_edges:
+                        u, v = edge[0], edge[1]
+                        in_cycle = False
+                        for cycle in solver_result.cycles:
+                            for i in range(len(cycle) - 1):
+                                if u == cycle[i] and v == cycle[i + 1]:
+                                    in_cycle = True
+                                    cycle_nodes.add(u)
+                                    cycle_nodes.add(v)
+                                    break
+                            if in_cycle:
+                                break
+
+                        if in_cycle:
+                            mermaid_lines.append(f"  {u} -->|waits for| {v}")
+                        else:
+                            mermaid_lines.append(f"  {u} -->|waits for| {v}")
+
+                    for node in cycle_nodes:
+                        mermaid_lines.append(f"  style {node} fill:#f99,stroke:#333,stroke-width:2px")
+
+                    for node in solver_result.input_nodes:
+                        if not any(node in edge for edge in solver_result.input_edges):
+                            mermaid_lines.append(f"  {node}")
+
+                    graph_diagram = "\n".join(mermaid_lines)
+
             elif isinstance(solver_result, MultiInstanceDetectionResult):
                 graph_data = solver_result.model_dump()
                 state_icon = "🔴" if solver_result.is_deadlocked else "✅"
@@ -226,6 +259,7 @@ class ResponseComposer:
             citations=citations,
             numerical_result=numerical_result,
             graph_data=graph_data,
+            graph_diagram=graph_diagram,
             teaching_notes=teaching_notes,
             model_used=model_name,
         )

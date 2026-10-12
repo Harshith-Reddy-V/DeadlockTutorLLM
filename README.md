@@ -2,7 +2,7 @@
 
 A domain-specific AI teaching assistant for Operating Systems (OS) deadlocks. Built from scratch for a university OS course, this project combines a deterministic symbolic solver, a local Retrieval-Augmented Generation (RAG) pipeline, and an LLM orchestration layer to teach students concepts, algorithms, graphs, and labs safely and accurately.
 
-**Current Phase:** Phase 4 (LLM Integration and End-to-End Orchestration)
+**Current Phase:** Phase 8 (Evaluation & Final System)
 
 ---
 
@@ -27,9 +27,10 @@ A domain-specific AI teaching assistant for Operating Systems (OS) deadlocks. Bu
    - Zero-dependency `MockLLMProvider` for blazing-fast CI testing.
    - Native support for Ollama, OpenAI-Compatible (vLLM, LM Studio), and HuggingFace PEFT models.
 
-5. **Streamlit Frontend**
+5. **Streamlit Frontend with Dynamic Graphs**
    - Clean, academic interface.
    - Expanders for step-by-step solver calculations and syllabus citations.
+   - Native Mermaid.js integration for visual cycle highlighting in Wait-For Graphs.
    - Visual badges indicating query category and syllabus groundedness.
 
 ---
@@ -52,10 +53,11 @@ cp .env.example .env
 By default, the `.env` uses the `mock` LLM provider and `mock` embedding provider. This is intentional to ensure the system boots instantly without large downloads. To use real models, edit `.env` to point to an active Ollama or LM Studio instance.
 
 ### 3. Ingesting Course Material (Optional)
-Place PDFs or PPTX files into `kb/raw/` and run:
+DeadlockTutorLLM does not bundle copyrighted textbook binaries in Git. Place your legally permitted syllabus slides or open-access chapters (e.g. OSTEP from [ostep.org](https://pages.cs.wisc.edu/~remzi/OSTEP/)) into `kb/raw/` and run:
 ```bash
 python scripts/ingest_kb.py
 ```
+See [kb/README.md](kb/README.md) for detailed document sourcing and licensing instructions.
 
 ### 4. Running the Application
 You must start both the backend API and the frontend UI.
@@ -80,7 +82,7 @@ The test suite runs entirely offline (using the Mock LLM and deterministic embed
 ```bash
 pytest tests/ -v
 ```
-*(Currently 51/51 tests passing)*
+*(Currently 56/56 tests passing)*
 
 ---
 
@@ -96,12 +98,11 @@ Read the full architecture spec in [docs/architecture.md](docs/architecture.md).
    - Executes deterministic matrices/DFS for `NUMERICAL` / `GRAPH`.
 4. **Prompt Assembly** → Merges data.
 5. **LLM Generation** → Explains the data.
-6. **Response Composer** → Structures the output with citations and step-by-step traces.
+6. **Response Composer** → Structures the output with citations, step-by-step traces, and dynamically generated Mermaid graph diagrams.
 
 ---
 
 ## 🚧 Limitations & Future Work
 
-- **Fine-Tuning:** The architecture contains integration points for a QLoRA fine-tuned pedagogical adapter, but the models have not yet been fine-tuned (Phase 5 planned).
 - **Concurrency:** Currently optimized for local, single-user operation.
 - **Vision:** Graph detection relies on manual edge inputs; future iterations could include a vision model for drawing analysis.

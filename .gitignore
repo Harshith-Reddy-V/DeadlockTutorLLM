@@ -50,6 +50,8 @@ htmlcov/
 
 # Knowledge Base & Vector Store indices / Large Files
 kb/raw/*
+kb/raw/*.pdf
+kb/raw/*.pptx
 !kb/raw/.gitkeep
 kb/processed/*
 !kb/processed/.gitkeep
@@ -66,9 +68,11 @@ models/
 *.safetensors
 *.onnx
 finetune_data/*.jsonl
+!finetune_data/sample.jsonl
 !finetune_data/sample_*.jsonl
 !finetune_data/README.md
 
-# Logs
+# Logs & Evaluation outputs
 *.log
 logs/
+evaluation/results.json
