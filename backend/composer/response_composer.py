@@ -72,15 +72,21 @@ class ResponseComposer:
         retrieval: Optional[RetrievalResult] = None,
         solver_result: Optional[Any] = None,
         model_name: str = "mock-tutor",
+        grounded: Optional[bool] = None,
+        groundedness_message: Optional[str] = None,
+        extra_teaching_notes: Optional[List[str]] = None,
     ) -> ComposedResponse:
         """Combine RAG context, solver output, and LLM text into a structured response.
 
         Args:
-            routing:       The routing decision (category + reason).
-            llm_text:      Generated explanation from the LLM.
-            retrieval:     Optional RAG retrieval result with chunks and citations.
-            solver_result: Optional output from the deterministic solver.
-            model_name:    Name of the model that generated llm_text.
+            routing:              The routing decision (category + reason).
+            llm_text:             Generated explanation from the LLM.
+            retrieval:            Optional RAG retrieval result with chunks and citations.
+            solver_result:        Optional output from the deterministic solver.
+            model_name:           Name of the model that generated llm_text.
+            grounded:             Whether the explanation is substantively grounded in evidence.
+            groundedness_message: Explanatory message regarding grounding assessment.
+            extra_teaching_notes: Additional pedagogical or factual warning notes.
 
         Returns:
             ComposedResponse ready for API serialization.
@@ -89,6 +95,8 @@ class ResponseComposer:
         citations: List[Citation] = []
         worked_steps: List[str] = []
         teaching_notes: List[str] = []
+        if extra_teaching_notes:
+            teaching_notes.extend(extra_teaching_notes)
         numerical_result = None
         graph_data = None
         graph_diagram = None
@@ -235,6 +243,11 @@ class ResponseComposer:
                     "for this query. The response below is based on standard OS textbook content and may not "
                     "reflect your specific course syllabus."
                 )
+            elif grounded is False:
+                msg = groundedness_message or "Detailed definitions in this response are drawn from standard OS theory rather than your course materials."
+                teaching_notes.append(
+                    f"📌 Course grounding note: {msg}"
+                )
             else:
                 teaching_notes.append(
                     "✅ This response is grounded in your course materials. See citations below."
@@ -246,6 +259,11 @@ class ResponseComposer:
                     "⚠️ No specific lab material was found in the knowledge base. "
                     "The code examples below use standard POSIX pthreads. "
                     "Always verify specific lab API requirements with your course instructor."
+                )
+            elif grounded is False:
+                msg = groundedness_message or "General concurrency patterns used; verify specific API rules in course syllabus."
+                teaching_notes.append(
+                    f"📌 Course grounding note: {msg}"
                 )
             else:
                 teaching_notes.append(
