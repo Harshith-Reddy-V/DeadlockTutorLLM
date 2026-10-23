@@ -19,7 +19,7 @@ Teaching style guide (applied in compose()):
 
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Set
 
 from pydantic import BaseModel
 
@@ -72,15 +72,21 @@ class ResponseComposer:
         retrieval: Optional[RetrievalResult] = None,
         solver_result: Optional[Any] = None,
         model_name: str = "mock-tutor",
+        grounded: Optional[bool] = None,
+        groundedness_message: Optional[str] = None,
+        extra_teaching_notes: Optional[List[str]] = None,
     ) -> ComposedResponse:
         """Combine RAG context, solver output, and LLM text into a structured response.
 
         Args:
-            routing:       The routing decision (category + reason).
-            llm_text:      Generated explanation from the LLM.
-            retrieval:     Optional RAG retrieval result with chunks and citations.
-            solver_result: Optional output from the deterministic solver.
-            model_name:    Name of the model that generated llm_text.
+            routing:              The routing decision (category + reason).
+            llm_text:             Generated explanation from the LLM.
+            retrieval:            Optional RAG retrieval result with chunks and citations.
+            solver_result:        Optional output from the deterministic solver.
+            model_name:           Name of the model that generated llm_text.
+            grounded:             Whether the explanation is substantively grounded in evidence.
+            groundedness_message: Explanatory message regarding grounding assessment.
+            extra_teaching_notes: Additional pedagogical or factual warning notes.
 
         Returns:
             ComposedResponse ready for API serialization.
@@ -89,6 +95,8 @@ class ResponseComposer:
         citations: List[Citation] = []
         worked_steps: List[str] = []
         teaching_notes: List[str] = []
+        if extra_teaching_notes:
+            teaching_notes.extend(extra_teaching_notes)
         numerical_result = None
         graph_data = None
         graph_diagram = None
@@ -184,29 +192,36 @@ class ResponseComposer:
                     "📌 In single-instance resource systems: deadlock ↔ cycle exists in the Wait-For Graph."
                 )
 
-                mermaid_lines = ["graph TD"]
-                for edge in solver_result.input_edges:
-                    u, v = edge[0], edge[1]
-                    in_cycle = False
-                    for cycle in solver_result.cycles:
-                        for i in range(len(cycle)):
-                            if u == cycle[i] and v == cycle[(i+1)%len(cycle)]:
-                                in_cycle = True
-                                break
-                        if in_cycle: break
-                    
-                    if in_cycle:
-                        mermaid_lines.append(f"  {u} -->|waits for| {v}")
-                        mermaid_lines.append(f"  style {u} fill:#f99,stroke:#333,stroke-width:2px")
-                        mermaid_lines.append(f"  style {v} fill:#f99,stroke:#333,stroke-width:2px")
-                    else:
-                        mermaid_lines.append(f"  {u} -->|waits for| {v}")
-                
-                for node in solver_result.input_nodes:
-                    if not any(node in edge for edge in solver_result.input_edges):
-                        mermaid_lines.append(f"  {node}")
+                if solver_result.input_nodes or solver_result.input_edges:
+                    mermaid_lines = ["graph TD"]
+                    cycle_nodes: Set[str] = set()
 
-                graph_diagram = "\n".join(mermaid_lines)
+                    for edge in solver_result.input_edges:
+                        u, v = edge[0], edge[1]
+                        in_cycle = False
+                        for cycle in solver_result.cycles:
+                            for i in range(len(cycle) - 1):
+                                if u == cycle[i] and v == cycle[i + 1]:
+                                    in_cycle = True
+                                    cycle_nodes.add(u)
+                                    cycle_nodes.add(v)
+                                    break
+                            if in_cycle:
+                                break
+
+                        if in_cycle:
+                            mermaid_lines.append(f"  {u} -->|waits for| {v}")
+                        else:
+                            mermaid_lines.append(f"  {u} -->|waits for| {v}")
+
+                    for node in cycle_nodes:
+                        mermaid_lines.append(f"  style {node} fill:#f99,stroke:#333,stroke-width:2px")
+
+                    for node in solver_result.input_nodes:
+                        if not any(node in edge for edge in solver_result.input_edges):
+                            mermaid_lines.append(f"  {node}")
+
+                    graph_diagram = "\n".join(mermaid_lines)
 
             elif isinstance(solver_result, MultiInstanceDetectionResult):
                 graph_data = solver_result.model_dump()
@@ -228,6 +243,11 @@ class ResponseComposer:
                     "for this query. The response below is based on standard OS textbook content and may not "
                     "reflect your specific course syllabus."
                 )
+            elif grounded is False:
+                msg = groundedness_message or "Detailed definitions in this response are drawn from standard OS theory rather than your course materials."
+                teaching_notes.append(
+                    f"📌 Course grounding note: {msg}"
+                )
             else:
                 teaching_notes.append(
                     "✅ This response is grounded in your course materials. See citations below."
@@ -239,6 +259,11 @@ class ResponseComposer:
                     "⚠️ No specific lab material was found in the knowledge base. "
                     "The code examples below use standard POSIX pthreads. "
                     "Always verify specific lab API requirements with your course instructor."
+                )
+            elif grounded is False:
+                msg = groundedness_message or "General concurrency patterns used; verify specific API rules in course syllabus."
+                teaching_notes.append(
+                    f"📌 Course grounding note: {msg}"
                 )
             else:
                 teaching_notes.append(

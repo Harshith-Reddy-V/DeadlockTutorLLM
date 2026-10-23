@@ -53,10 +53,11 @@ cp .env.example .env
 By default, the `.env` uses the `mock` LLM provider and `mock` embedding provider. This is intentional to ensure the system boots instantly without large downloads. To use real models, edit `.env` to point to an active Ollama or LM Studio instance.
 
 ### 3. Ingesting Course Material (Optional)
-Place PDFs or PPTX files into `kb/raw/` and run:
+DeadlockTutorLLM does not bundle copyrighted textbook binaries in Git. Place your legally permitted syllabus slides or open-access chapters (e.g. OSTEP from [ostep.org](https://pages.cs.wisc.edu/~remzi/OSTEP/)) into `kb/raw/` and run:
 ```bash
 python scripts/ingest_kb.py
 ```
+See [kb/README.md](kb/README.md) for detailed document sourcing and licensing instructions.
 
 ### 4. Running the Application
 You must start both the backend API and the frontend UI.
@@ -81,7 +82,7 @@ The test suite runs entirely offline (using the Mock LLM and deterministic embed
 ```bash
 pytest tests/ -v
 ```
-*(Currently 51/51 tests passing)*
+*(Currently 56/56 tests passing)*
 
 ---
 

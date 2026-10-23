@@ -6,21 +6,34 @@ It exports a PEFT adapter that can be loaded into HuggingFaceProvider.
 """
 
 import os
+import sys
 import argparse
 import logging
-import torch
-from datasets import load_dataset
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    TrainingArguments,
-    BitsAndBytesConfig
-)
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+try:
+    import torch
+    from datasets import load_dataset
+    from transformers import (
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        TrainingArguments,
+        BitsAndBytesConfig
+    )
+    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+    from trl import SFTTrainer
+except ImportError as err:
+    logger.error(
+        "Missing fine-tuning dependencies: %s\n"
+        "Fine-tuning requires additional packages. Please install them using:\n"
+        "    pip install -r requirements-train.txt",
+        err
+    )
+    # We allow running --help without crashing
+    if "--help" not in sys.argv and "-h" not in sys.argv:
+        sys.exit(1)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="QLoRA Fine-Tuning for DeadlockTutorLLM")
@@ -61,6 +74,13 @@ def main():
 
     dataset = load_dataset("json", data_files=args.data_path, split="train")
     dataset = dataset.map(format_prompt)
+
+    if not torch.cuda.is_available():
+        logger.error(
+            "CUDA GPU is not available. 4-bit QLoRA fine-tuning with bitsandbytes "
+            "requires an NVIDIA GPU (Linux or WSL2 recommended)."
+        )
+        return
 
     logger.info(f"Initializing QLoRA configuration for model: {args.model_name}")
     
